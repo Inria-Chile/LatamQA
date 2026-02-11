@@ -2,6 +2,7 @@
 """
 Example of script to evaluate models through API (OpenAI and Mistral)
 """
+
 import argparse
 import os
 import random
@@ -10,12 +11,27 @@ from pathlib import Path
 from typing import List, Tuple
 
 import pandas as pd
+import structlog
 from datasets import load_dataset
-from openai import OpenAI
-from tqdm import tqdm
+from tabulate import SEPARATING_LINE, tabulate
+from tqdm.auto import tqdm
 
-API_KEY = os.environ.get("API_LLM")
-BASE_URL = os.environ.get("URL_LLM")
+logger = structlog.get_logger()
+
+DEFAULT_PROPMT_TEMPLATE: str = """"Answer the following multiple-choice question by selecting ONLY the letter (A, B, C, or D) of the correct answer.
+
+Question: {question}
+
+A) {option_a}
+B) {option_b}
+C) {option_c}
+D) {option_d}
+
+Answer:
+"""  # noqa: E501
+
+API_KEY: str = os.environ.get("API_LLM")
+BASE_URL: str = os.environ.get("URL_LLM")
 
 
 def sanitize(s: str) -> str:
@@ -27,14 +43,30 @@ def select_provider(provider):
     if provider == "mistral":
         try:
             from mistralai import Mistral
+
+            if not API_KEY:
+                logger.error("API_KEY enviroment variable is not set.")
+                exit(1)
+
             client = Mistral(api_key=API_KEY)
         except ImportError:
-            raise ImportError("mistralai package not installed. Run: pip install mistralai")
+            raise ImportError("mistralai package not installed.")
     elif provider == "openai":
-        client = OpenAI(
-            api_key=API_KEY,
-            base_url=BASE_URL,
-        )
+        try:
+            from openai import OpenAI
+
+            if not API_KEY:
+                logger.error("API_KEY enviroment variable is not set.")
+                exit(1)
+            if not BASE_URL:
+                logger.error("BASE_URL enviroment variable is not set.")
+                exit(1)
+            client = OpenAI(
+                api_key=API_KEY,
+                base_url=BASE_URL,
+            )
+        except ImportError:
+            raise ImportError("mistralai package not installed.")
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     return client
@@ -58,7 +90,7 @@ def shuffle_options(
     random.shuffle(options)
 
     correct_idx = next(i for i, (label, _) in enumerate(options) if label == "answer")
-    correct_letter = chr(ord('A') + correct_idx)
+    correct_letter = chr(ord("A") + correct_idx)
 
     return [opt[1] for opt in options], correct_letter
 
@@ -69,17 +101,17 @@ def extract_answer(response: str) -> str:
     response = response.upper().strip()
     if response and response[0] in "ABCD":
         return response[0]
-    match = re.search(r'\b([ABCD])[\).]', response)
+    match = re.search(r"\b([ABCD])[\).]", response)
     if match:
         return match.group(1)
-    match = re.search(r'\b([ABCD])\b', response)
+    match = re.search(r"\b([ABCD])\b", response)
     if match:
         if match.group(1) == "A":
             start, end = match.span()
-            if response_ini[start:end] == 'a':
+            if response_ini[start:end] == "a":
                 return None
             else:
-                return 'A'
+                return "A"
         else:
             return match.group(1)
     return None
@@ -120,9 +152,7 @@ def evaluate_mcq(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="LATAMQA evaluation script"
-    )
+    parser = argparse.ArgumentParser(description="LatamQA evaluation script")
     parser.add_argument("--model", required=True, help="Model name to evaluate")
     parser.add_argument("--provider", choices=["openai", "mistral"], default="openai", help="Model provider")
     parser.add_argument("--region", choices=["es-la", "es-es", "pt-br"], default="es-la", help="Dataset selection")
@@ -130,23 +160,28 @@ def main():
     parser.add_argument("--limit", type=int, default=None, help="Limit number of rows")
     parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
     parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
+    parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
     args = parser.parse_args()
 
-    print(f"\n{'='*60}")
-    print("  LatamQA MCQ Evaluation")
-    print(f"{'='*60}")
-    print(f"  Model:       {args.model}")
-    print(f"  Provider:    {args.provider}")
-    print(f"  Region:      {args.region}")
-    print(f"  Language:    {'english' if args.lang == 'en' else 'original'}")
-    print(f"  Temperature: {args.temperature}")
-    print(f"  Seed:        {args.seed}")
-    if args.limit:
-        print(f"  Limit:       {args.limit}")
-    print(f"{'='*60}\n")
+    print(f"\n{'=' * 60}")
+    logger.info("LatamQA multiple choice question (MCQ) evaluation")
 
-    dts_path = f"inria-chile/latamqa_mcq_{args.region}"
-    ds = load_dataset(dts_path)
+    table = [
+        ["Model:", args.model],
+        ["Provider:", args.provider],
+        ["Region:", args.region],
+        ["Language:", "english" if args.lang == "en" else "original"],
+        ["Temperature:", args.temperature],
+        ["Seed:", args.seed],
+    ]
+    if args.limit:
+        table.append(["Limit:", args.limit])
+    if args.prompt_template:
+        table.append(["Custom prompt template:", args.prompt_template])
+
+    logger.info(tabulate(table, tablefmt="rounded_grid", colalign=["left", "right"]))
+
+    ds = load_dataset(f"inria-chile/latamqa_mcq_{args.region}")
 
     if args.lang == "en":
         q, a, d1, d2, d3 = "question_en", "answer_en", "distractor1_en", "distractor2_en", "distractor3_en"
@@ -154,9 +189,6 @@ def main():
         q, a, d1, d2, d3 = "question", "answer", "distractor1", "distractor2", "distractor3"
 
     client = select_provider(args.provider)
-
-    with open("prompt_eval.txt", "r", encoding="utf-8") as f:
-        prompt_template = f.read()
 
     data = ds["train"]
     if args.limit:
@@ -167,12 +199,16 @@ def main():
     total = 0
     total_err = 0
 
+    if args.prompt_template:
+        with open("prompt_eval.txt", "r", encoding="utf-8") as f:
+            prompt_template = f.read()
+    else:
+        prompt_template = DEFAULT_PROPMT_TEMPLATE
+
     for item in tqdm(data, desc="Evaluating"):
         question = item[q]
         row_seed = args.seed + hash(str(item["article_id"])) % 10000
-        options, correct_letter = shuffle_options(
-            item[a], item[d1], item[d2], item[d3], row_seed
-        )
+        options, correct_letter = shuffle_options(item[a], item[d1], item[d2], item[d3], row_seed)
         try:
             response = evaluate_mcq(
                 args.model,
@@ -190,51 +226,56 @@ def main():
                 correct += 1
             total += 1
 
-            results.append({
-                "article_id": item["article_id"],
-                "question": item["question"],
-                "correct_answer": item["answer"],
-                "option_A": options[0],
-                "option_B": options[1],
-                "option_C": options[2],
-                "option_D": options[3],
-                "correct_letter": correct_letter,
-                "model_response": response,
-                "predicted_letter": predicted,
-                "is_correct": is_correct,
-            })
+            results.append(
+                {
+                    "article_id": item["article_id"],
+                    "question": item["question"],
+                    "correct_answer": item["answer"],
+                    "option_A": options[0],
+                    "option_B": options[1],
+                    "option_C": options[2],
+                    "option_D": options[3],
+                    "correct_letter": correct_letter,
+                    "model_response": response,
+                    "predicted_letter": predicted,
+                    "is_correct": is_correct,
+                }
+            )
 
         except Exception as e:
             print(f"\n  [ERROR] article_id={item.get('article_id')}: {e}")
-            results.append({
-                "article_id": item["article_id"],
-                "question": item["question"],
-                "correct_answer": item["answer"],
-                "option_A": options[0],
-                "option_B": options[1],
-                "option_C": options[2],
-                "option_D": options[3],
-                "correct_letter": correct_letter,
-                "model_response": None,
-                "predicted_letter": None,
-                "is_correct": False,
-            })
+            results.append(
+                {
+                    "article_id": item["article_id"],
+                    "question": item["question"],
+                    "correct_answer": item["answer"],
+                    "option_A": options[0],
+                    "option_B": options[1],
+                    "option_C": options[2],
+                    "option_D": options[3],
+                    "correct_letter": correct_letter,
+                    "model_response": None,
+                    "predicted_letter": None,
+                    "is_correct": False,
+                }
+            )
             total_err += 1
 
     accuracy = correct / total if total > 0 else 0
 
-    print(f"\n{'='*60}")
-    print("  Results")
-    print(f"{'='*60}")
-    print(f"  Model:       {args.model}")
-    print(f"  Region:      {args.region}")
-    print(f"  Language:    {'english' if args.lang == 'en' else 'original'}")
-    print(f"{'─'*60}")
-    print(f"  Total:       {total}")
-    print(f"  Correct:     {correct}")
-    print(f"  Errors:      {total_err}")
-    print(f"  Accuracy:    {accuracy:.2%}")
-    print(f"{'='*60}")
+    results_table = [
+        ["Model:", args.model],
+        ["Region:", args.region],
+        ["Language:", "english" if args.lang == "en" else "original"],
+        SEPARATING_LINE,
+        ["Total:", total],
+        ["Correct:", correct],
+        ["Errors:", total_err],
+        ["Accuracy:", f"{accuracy:.2%}"],
+    ]
+
+    logger.info("Evaluation results:")
+    logger.info(tabulate(results_table, tablefmt="rounded_grid", colalign=["left", "right"]))
 
     df_results = pd.DataFrame(results)
     model_tag = sanitize(args.model)
@@ -255,9 +296,9 @@ def main():
     }
     summary_path = Path("results") / f"mcq_eval_summary_{args.region}_{args.lang}_{model_tag}.txt"
     with open(summary_path, "w") as f:
-        for k, v in summary.items():
-            f.write(f"{k}: {v}\n")
-    print(f"  Summary saved to: {summary_path}")
+        lines = [f"{k}: {v}" for k, v in summary.items()]
+        f.writelines(lines)
+    logger.info(f"Summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":
