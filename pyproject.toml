@@ -1,0 +1,65 @@
+[project]
+name = "LatamQA"
+version = "0.1.0"
+description = "Supporting code for paper «Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America»."
+authors = [{ name = "Inria Chile and collaborators", email = "info@inria.cl" }]
+requires-python = ">=3.12,<4.0"
+readme = "README.md"
+license = "mit"
+
+dependencies = [
+    "pandas",
+    "datasets",
+    "tqdm",
+    "mistralai",
+    "openai",
+    "structlog>=25.5.0",
+    "tabulate>=0.9.0",
+]
+
+[dependency-groups]
+dev = ["notebook", "ipywidgets", "pytest", "pytest-cov", "ipykernel"]
+
+[tool.uv]
+
+
+[tool.hatch.build.targets.sdist]
+include = ["latamqa"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"pyproject.toml" = "pyproject.toml"
+configs = "configs"
+
+[tool.hatch.build.targets.wheel]
+include = ["latamqa"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 128
+lint.select = [
+    "F",    # Pyflakes
+    "E",    # Pycodestyle
+    "W",
+    "I",    # isort
+    "N",    # pep8-naming
+    "NPY",  # NumPy-specific rules
+    "PERF", # Perflint
+    "FURB", # refurb
+    "PD",   # pandas-vet
+    "RUF",  # Ruff-specific rules
+]
+lint.ignore = ["E402", "N806"]
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules --log-cli-format='%(asctime)s [%(levelname)7s] %(message)s (%(filename)s:%(lineno)s)' --log-cli-date-format='%Y-%m-%d %H:%M:%S'"
+junit_family = "xunit2"
+testpaths = ["tests"]
+log_cli = true
+log_cli_level = "INFO"
+norecursedirs = ".venv"
+
+[project.scripts]
+eval_mcq = "latamqa.eval_mcq:main"
