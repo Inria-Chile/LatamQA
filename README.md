@@ -1,5 +1,14 @@
 # LatamQA 
 
+<!--
+Source - https://stackoverflow.com/a/38274615
+Posted by user3638471, modified by community. See post 'Timeline' for change history
+Retrieved 2026-02-11, License - CC BY-SA 4.0
+-->
+
+<img src="latam_questions_map.png" alt="Alt Text" width="300"/>
+
+
 [LatamQA](https://users.dcc.uchile.cl/~vbarrier/paper/MME_ACL_SC_Biases.pdf) is a cultural knowledge benchmark designed to evaluate Large Language Models on Latin American contexts. The dataset addresses the critical gap in bias detection resources for non-English languages and underrepresented cultures. Built from 26,000+ Wikipedia articles and structured using Wikidata's knowledge graph with expert guidance from social scientists, LatamQA contains over 26,000 multiple-choice questions covering the diverse popular and social cultures of Latin American countries. Questions are available in Spanish and Portuguese (the region's primary languages) as well as English translations, enabling evaluation of both multilingual capabilities and cultural representation. This resource helps researchers assess whether LLMs—predominantly trained on Global North data—exhibit prejudicial behavior or knowledge gaps when handling Latin American cultural contexts.
 
 ## Composition 
