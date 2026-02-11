@@ -1,0 +1,7 @@
+model: ministral-small
+region: es-es
+lang: o
+total: 100
+correct: 83
+errors: 0
+accuracy: 0.83

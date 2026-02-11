@@ -1,0 +1,10 @@
+Answer the following multiple-choice question by selecting ONLY the letter (A, B, C, or D) of the correct answer.
+
+Question: {question}
+
+A) {option_a}
+B) {option_b}
+C) {option_c}
+D) {option_d}
+
+Answer:
