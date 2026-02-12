@@ -13,7 +13,7 @@ from typing import List, Tuple
 import pandas as pd
 import structlog
 from datasets import load_dataset
-from tabulate import SEPARATING_LINE, tabulate
+from tabulate import tabulate
 from tqdm.auto import tqdm
 
 logger = structlog.get_logger()
@@ -45,7 +45,7 @@ def select_provider(provider):
             from mistralai import Mistral
 
             if not API_KEY:
-                logger.error("API_KEY enviroment variable is not set.")
+                logger.fatal("API_LLM enviroment variable is not set.")
                 exit(1)
 
             client = Mistral(api_key=API_KEY)
@@ -56,10 +56,10 @@ def select_provider(provider):
             from openai import OpenAI
 
             if not API_KEY:
-                logger.error("API_KEY enviroment variable is not set.")
+                logger.fatal("API_LLM enviroment variable is not set.")
                 exit(1)
             if not BASE_URL:
-                logger.error("BASE_URL enviroment variable is not set.")
+                logger.fatal("URL_LLM enviroment variable is not set.")
                 exit(1)
             client = OpenAI(
                 api_key=API_KEY,
@@ -163,7 +163,6 @@ def main():
     parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
     args = parser.parse_args()
 
-    print(f"\n{'=' * 60}")
     logger.info("LatamQA multiple choice question (MCQ) evaluation")
 
     table = [
@@ -179,9 +178,12 @@ def main():
     if args.prompt_template:
         table.append(["Custom prompt template:", args.prompt_template])
 
-    logger.info(tabulate(table, tablefmt="rounded_grid", colalign=["left", "right"]))
+    logger.info("Configuration:\n" + tabulate(table, tablefmt="rounded_grid", colalign=["left", "right"]))
 
-    ds = load_dataset(f"inria-chile/latamqa_mcq_{args.region}")
+    dataset_name = f"inria-chile/latamqa_mcq_{args.region}"
+
+    logger.info(f"Loading dataset «{dataset_name}».")
+    ds = load_dataset(dataset_name)
 
     if args.lang == "en":
         q, a, d1, d2, d3 = "question_en", "answer_en", "distractor1_en", "distractor2_en", "distractor3_en"
@@ -243,7 +245,7 @@ def main():
             )
 
         except Exception as e:
-            print(f"\n  [ERROR] article_id={item.get('article_id')}: {e}")
+            logger.error(f"article_id={item.get('article_id')}: {e}.")
             results.append(
                 {
                     "article_id": item["article_id"],
@@ -267,15 +269,13 @@ def main():
         ["Model:", args.model],
         ["Region:", args.region],
         ["Language:", "english" if args.lang == "en" else "original"],
-        SEPARATING_LINE,
         ["Total:", total],
         ["Correct:", correct],
         ["Errors:", total_err],
         ["Accuracy:", f"{accuracy:.2%}"],
     ]
 
-    logger.info("Evaluation results:")
-    logger.info(tabulate(results_table, tablefmt="rounded_grid", colalign=["left", "right"]))
+    logger.info("Evaluation results:\n" + tabulate(results_table, tablefmt="rounded_grid", colalign=["left", "right"]))
 
     df_results = pd.DataFrame(results)
     model_tag = sanitize(args.model)
@@ -283,7 +283,7 @@ def main():
     out_path = Path("results") / out_name
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_results.to_csv(out_path, index=False, encoding="utf-8")
-    print(f"\n  Results saved to: {out_path}")
+    logger.info(f"Results saved to: {out_path}")
 
     summary = {
         "model": args.model,
