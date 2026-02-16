@@ -100,15 +100,38 @@ Results are saved in the `results/` directory:
 
 ## Citation
 
-If this work was useful please cite the following:
+If this work was useful please cite it as:
+
+> Karmim, Y., Pino, R., Contreras, H., Lira, H., Cifuentes, S., Escoffier, S., Martí, L., Seddah, D., & Barriere, V. (2026). **Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America**. In Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026). Rabbat, Morocco. [⟨hal-05510068⟩](https:/.hal.science/hal-05510068).
+
+BibTeX:
 
 ```bibtex
 @inproceedings{karmimleveraging2026,
-  title={Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America},
-  author={Karmim, Yannis and Pino, Renato and Contreras, Hernan and Lira, Hernan and Cifuentes, Sebastien and Escoffier, Simon and Marti, Luis and Seddah, Djamé and Barriere, Valentin},
-  booktitle={Proceedings of the 1sh Workshop on Multilingual Multicultural Evaluation @ EACL26},
-  url={https://users.dcc.uchile.cl/~vbarrier/paper/MME_ACL_SC_Biases.pdf},
-  year={2026}
+  title      = {
+    Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: {A}pplication to
+    {L}atin {A}merica
+  },
+  author     = {
+    Karmim, Yannis and Pino, Renato and Contreras, Hernan and Lira, Hernan and Cifuentes, Sebastien and
+    Escoffier, Simon and Mart\'{i}, Luis and Seddah, Djam{\'e} and Barri{\`e}re, Valentin
+  },
+  year       = 2026,
+  month      = {Mar},
+  booktitle  = {
+    Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the
+    European Chapter of the Association for Computational Linguistics (EACL'2026)
+  },
+  address    = {Rabbat, Morocco},
+  url        = {https://inria.hal.science/hal-05510068},
+  editor     = {
+    Pinzhen Chen and Vil\'{e}m Zouhar and Hanxu Hu and Simran Khanuja and Wenhao Zhu and Barry Haddow and
+    Alexandra Birch and Alham Fikri Aji and Rico Sennrich and Sara Hooker
+  },
+  hal_id     = {hal-05510068},
+  hal_version = {v1},
+  eprint     = {hal-05510068},
+  eprinttype = {hal}
 }
 ```
 
