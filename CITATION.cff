@@ -1,0 +1,53 @@
+cff-version: 1.2.0
+message: If you use these results, please cite both the article as follows.
+authors:
+  - family-names: Karmim
+    given-names: Yannis
+  - family-names: Pino
+    given-names: Renato
+  - family-names: Contreras
+    given-names: Hernan
+  - family-names: Lira
+    given-names: Hernan
+  - family-names: Cifuentes
+    given-names: Sebastien
+  - family-names: Escoffier
+    given-names: Simon
+  - family-names: Mart\'i
+    given-names: Luis
+  - family-names: Seddah
+    given-names: Djame\'e
+  - family-names: Barri\`ere
+    given-names: Valentin
+title: 'Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America'
+version: 1.0.0
+url: https://inria.hal.science/hal-05510068
+date-released: '2026-02-16'
+preferred-citation:
+  authors:
+    - family-names: Karmim
+      given-names: Yannis
+    - family-names: Pino
+      given-names: Renato
+    - family-names: Contreras
+      given-names: Hernan
+    - family-names: Lira
+      given-names: Hernan
+    - family-names: Cifuentes
+      given-names: Sebastien
+    - family-names: Escoffier
+      given-names: Simon
+    - family-names: Mart\'i
+      given-names: Luis
+    - family-names: Seddah
+      given-names: Djame\'e
+    - family-names: Barri\`ere
+      given-names: Valentin
+  title: 'Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America'
+  url: https://inria.hal.science/hal-05510068
+  type: conference-paper
+  year: 2026
+  collection-title: Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026)
+  conference: {Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026)}
+  publisher:
+    address: Rabbat, Morocco
