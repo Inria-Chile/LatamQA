@@ -15,6 +15,8 @@ dependencies = [
     "openai",
     "structlog>=25.5.0",
     "tabulate>=0.9.0",
+    "gradio-leaderboard>=0.0.14",
+    "litellm",
 ]
 
 [dependency-groups]
@@ -63,3 +65,5 @@ norecursedirs = ".venv"
 
 [project.scripts]
 eval_mcq = "latamqa.eval_mcq:main"
+eval_mcq_any = "latamqa.eval_mcq_any:main"
+update_leaderboard = "latamqa.leaderboard.update_leaderboard:main"

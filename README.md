@@ -87,6 +87,40 @@ uv run eval_mcq --model meta-llama/Llama-3.1-8B-Instruct --region pt-br --lang e
 uv run eval_mcq --model mistral-large-latest --provider mistral --region es-es
 ```
 
+## `eval_mcq_any` Universal Evaluation script
+
+[`latamqa/eval_mcq_any.py`](latamqa/eval_mcq_any.py) is a universal version of the evaluation script that supports 100+ LLM providers (OpenAI, Anthropic, Mistral, Ollama, vLLM, etc.) via [LiteLLM](https://github.com/BerriAI/litellm).
+
+### Usage
+
+```bash
+uv run eval_mcq_any --model PROVIDER/MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {o,en}] [--api_key API_KEY] [--base_url BASE_URL] [OTHER_OPTIONS]
+```
+
+| Argument  | Default | Description |
+|-----------|---------|-------------|
+| `--model` | (required) | Model name (e.g., `gpt-4o`, `anthropic/claude-3-5-sonnet-20240620`, `ollama/llama3`) |
+| `--api_key` | `API_LLM` env | API key for the provider |
+| `--base_url` | `URL_LLM` env | Base URL for local or custom providers (e.g., `http://localhost:11434` for Ollama) |
+
+### Examples for different providers
+
+```bash
+# OpenAI (standard)
+export OPENAI_API_KEY="sk-..."
+uv run eval_mcq_any --model gpt-4o
+
+# Anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."
+uv run eval_mcq_any --model anthropic/claude-3-5-sonnet-20240620
+
+# Local model via Ollama
+uv run eval_mcq_any --model ollama/llama3 --base_url http://localhost:11434
+
+# Local model via vLLM (OpenAI-compatible)
+uv run eval_mcq_any --model openai/your-model --base_url http://localhost:8000/v1 --api_key "dummy"
+```
+
 ### Custom prompt template
 
 If you want to use a custom evaluation prompt you can pass the file name as argument to `eval_mcq.py`. File `prompt_eval.txt` contains an example of prompt.
@@ -97,6 +131,22 @@ Results are saved in the `results/` directory:
 
 * `mcq_eval_results_<region>_<lang>_<model>.csv` -- per-question details
 * `mcq_eval_summary_<region>_<lang>_<model>.txt` -- accuracy summary
+
+## Leaderboard
+
+The project includes a Gradio-based leaderboard to visualize model performance.
+
+### 1. Update leaderboard data
+After running evaluations, aggregate the results into the leaderboard format:
+```bash
+uv run update_leaderboard
+```
+
+### 2. Launch the leaderboard app
+```bash
+uv run python latamqa/leaderboard/app.py
+```
+The leaderboard will be available at `http://127.0.0.1:7860`.
 
 ## Citation
 
