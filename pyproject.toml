@@ -1,7 +1,7 @@
 [project]
 name = "LatamQA"
 version = "0.1.0"
-description = "Supporting code for paper «Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America»."
+description = "Code for paper «Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America»."
 authors = [{ name = "Inria Chile and collaborators", email = "info@inria.cl" }]
 requires-python = ">=3.12,<4.0"
 readme = "README.md"
@@ -11,12 +11,14 @@ dependencies = [
     "pandas",
     "datasets",
     "tqdm",
-    "mistralai",
-    "openai",
-    "structlog>=25.5.0",
-    "tabulate>=0.9.0",
-    "gradio-leaderboard>=0.0.14",
+    "structlog",
+    "tabulate",
+    "gradio-leaderboard",
     "litellm",
+    "ollama>=0.6.1",
+    "gradio>=5.50.0",
+    "matplotlib>=3.10.8",
+    "seaborn>=0.13.2",
 ]
 
 [dependency-groups]
@@ -65,5 +67,4 @@ norecursedirs = ".venv"
 
 [project.scripts]
 eval_mcq = "latamqa.eval_mcq:main"
-eval_mcq_any = "latamqa.eval_mcq_any:main"
-update_leaderboard = "latamqa.leaderboard.update_leaderboard:main"
+leaderboard = "latamqa.leaderboard:main"

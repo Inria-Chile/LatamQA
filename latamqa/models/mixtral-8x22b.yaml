@@ -1,0 +1,5 @@
+LiteLLM model name: ollama/mixtral:8x22b
+Model name: mistral-ai/Mixtral-8x22B-Instruct-v0.1
+Model URL: https://huggingface.co/mistral-ai/Mixtral-8x22B-Instruct-v0.1
+Model size: 141B
+Model type: large

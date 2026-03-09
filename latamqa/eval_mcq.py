@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Example of script to evaluate models through API (OpenAI and Mistral)
+Universal script to evaluate models through API (OpenAI, Mistral, Anthropic, Ollama, vLLM, etc.) using LiteLLM.
 """
 
 import argparse
-import os
 import random
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import pandas as pd
 import structlog
 from datasets import load_dataset
-from tabulate import tabulate
+from litellm import completion
+from rich.console import Console
+from rich.markdown import Markdown
 from tqdm.auto import tqdm
 
 logger = structlog.get_logger()
@@ -30,46 +31,13 @@ D) {option_d}
 Answer:
 """  # noqa: E501
 
-API_KEY: str = os.environ.get("API_LLM")
-BASE_URL: str = os.environ.get("URL_LLM")
+REGIONAL_DATASETS = ["es-la", "es-es", "pt-br"]
+TARGET_LANGUAGES = ["regional", "english"]
 
 
 def sanitize(s: str) -> str:
     """Sanitize string for use in filenames."""
     return s.replace("/", "-").replace(":", "-")
-
-
-def select_provider(provider):
-    if provider == "mistral":
-        try:
-            from mistralai import Mistral
-
-            if not API_KEY:
-                logger.fatal("API_LLM enviroment variable is not set.")
-                exit(1)
-
-            client = Mistral(api_key=API_KEY)
-        except ImportError:
-            raise ImportError("mistralai package not installed.")
-    elif provider == "openai":
-        try:
-            from openai import OpenAI
-
-            if not API_KEY:
-                logger.fatal("API_LLM enviroment variable is not set.")
-                exit(1)
-            if not BASE_URL:
-                logger.fatal("URL_LLM enviroment variable is not set.")
-                exit(1)
-            client = OpenAI(
-                api_key=API_KEY,
-                base_url=BASE_URL,
-            )
-        except ImportError:
-            raise ImportError("mistralai package not installed.")
-    else:
-        raise ValueError(f"Unsupported provider: {provider}")
-    return client
 
 
 def shuffle_options(
@@ -95,7 +63,7 @@ def shuffle_options(
     return [opt[1] for opt in options], correct_letter
 
 
-def extract_answer(response: str) -> str:
+def extract_answer(response: str) -> str | None:
     """Extract the letter (A, B, C, D) from the model's response."""
     response_ini = response.strip()
     response = response.upper().strip()
@@ -120,106 +88,90 @@ def extract_answer(response: str) -> str:
 def evaluate_mcq(
     model: str,
     prompt_template: str,
-    provider: str,
     question: str,
     options: List[str],
     temperature: float,
-    client,
+    llm_api_key: str | None = None,
+    llm_uri: str | None = None,
 ) -> str:
-    """Ask the LLM to answer the MCQ and return its response."""
+    """Ask the LLM to answer the MCQ via LiteLLM and return its response."""
     prompt = prompt_template.replace("{question}", question)
     prompt = prompt.replace("{option_a}", options[0])
     prompt = prompt.replace("{option_b}", options[1])
     prompt = prompt.replace("{option_c}", options[2])
     prompt = prompt.replace("{option_d}", options[3])
 
-    if provider == "mistral":
-        resp = client.chat.complete(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=100,
-        )
-        return resp.choices[0].message.content.strip()
-    else:
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=100,
-        )
-        return resp.choices[0].message.content.strip()
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": temperature,
+        "max_tokens": 10,  # We only need one letter
+    }
+
+    if llm_api_key:
+        kwargs["api_key"] = llm_api_key
+    if llm_uri:
+        kwargs["api_base"] = llm_uri
+
+    resp = completion(**kwargs)
+    return resp.choices[0].message.content.strip()  # type: ignore
 
 
-def main():
-    parser = argparse.ArgumentParser(description="LatamQA evaluation script")
-    parser.add_argument("--model", required=True, help="Model name to evaluate")
-    parser.add_argument("--provider", choices=["openai", "mistral"], default="openai", help="Model provider")
-    parser.add_argument("--region", choices=["es-la", "es-es", "pt-br"], default="es-la", help="Dataset selection")
-    parser.add_argument("--lang", choices=["o", "en"], default="o", help="Language: 'o' for original, 'en' for english")
-    parser.add_argument("--limit", type=int, default=None, help="Limit number of rows")
-    parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
-    parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
-    args = parser.parse_args()
+def run_evaluation(
+    model: str,
+    region: str = "es-la",
+    lang: str = "regional",
+    max_results: int | None = None,
+    seed: int = 42,
+    temperature: float = 0.0,
+    prompt_template: str | None = None,
+    results_dir: str | Path = Path().cwd() / "results",
+    llm_api_key: str | None = None,
+    llm_uri: str | None = None,
+):
+    """Run the MCQ evaluation."""
 
-    logger.info("LatamQA multiple choice question (MCQ) evaluation")
-
-    table = [
-        ["Model:", args.model],
-        ["Provider:", args.provider],
-        ["Region:", args.region],
-        ["Language:", "english" if args.lang == "en" else "original"],
-        ["Temperature:", args.temperature],
-        ["Seed:", args.seed],
-    ]
-    if args.limit:
-        table.append(["Limit:", args.limit])
-    if args.prompt_template:
-        table.append(["Custom prompt template:", args.prompt_template])
-
-    logger.info("Configuration:\n" + tabulate(table, tablefmt="rounded_grid", colalign=["left", "right"]))
-
-    dataset_name = f"inria-chile/latamqa_mcq_{args.region}"
+    dataset_name = f"inria-chile/latamqa_mcq_{region}"
 
     logger.info(f"Loading dataset «{dataset_name}».")
     ds = load_dataset(dataset_name)
 
-    if args.lang == "en":
+    if lang == "english":
         q, a, d1, d2, d3 = "question_en", "answer_en", "distractor1_en", "distractor2_en", "distractor3_en"
-    else:
+    elif lang == "regional":
         q, a, d1, d2, d3 = "question", "answer", "distractor1", "distractor2", "distractor3"
-
-    client = select_provider(args.provider)
+    else:
+        raise ValueError(f"lang={lang} is not supported.")
 
     data = ds["train"]
-    if args.limit:
-        data = data.select(range(min(args.limit, len(data))))
+
+    if max_results:
+        data = data.select(range(min(max_results, len(data))))
 
     results = []
     correct = 0
     total = 0
     total_err = 0
 
-    if args.prompt_template:
-        with open("prompt_eval.txt", "r", encoding="utf-8") as f:
+    if prompt_template:
+        with open(prompt_template, "r", encoding="utf-8") as f:
             prompt_template = f.read()
     else:
         prompt_template = DEFAULT_PROPMT_TEMPLATE
 
-    for item in tqdm(data, desc="Evaluating"):
+    for item in tqdm(data, desc=f"Evaluating «{dataset_name}»"):
         question = item[q]
-        row_seed = args.seed + hash(str(item["article_id"])) % 10000
+        row_seed = seed + hash(str(item["article_id"])) % 10000
         options, correct_letter = shuffle_options(item[a], item[d1], item[d2], item[d3], row_seed)
         try:
             response = evaluate_mcq(
-                args.model,
+                model,
                 prompt_template,
-                args.provider,
                 question,
                 options,
-                args.temperature,
-                client,
+                temperature,
+                llm_api_key=llm_api_key,
+                llm_uri=llm_uri,
             )
             predicted = extract_answer(response)
             is_correct = predicted == correct_letter
@@ -265,40 +217,125 @@ def main():
 
     accuracy = correct / total if total > 0 else 0
 
-    results_table = [
-        ["Model:", args.model],
-        ["Region:", args.region],
-        ["Language:", "english" if args.lang == "en" else "original"],
-        ["Total:", total],
-        ["Correct:", correct],
-        ["Errors:", total_err],
-        ["Accuracy:", f"{accuracy:.2%}"],
-    ]
-
-    logger.info("Evaluation results:\n" + tabulate(results_table, tablefmt="rounded_grid", colalign=["left", "right"]))
-
     df_results = pd.DataFrame(results)
-    model_tag = sanitize(args.model)
-    out_name = f"mcq_eval_results_{args.region}_{args.lang}_{model_tag}.csv"
-    out_path = Path("results") / out_name
+    model_tag = sanitize(model)
+    out_name = f"mcq_eval_results_{region}_{lang}_{model_tag}.csv"
+    out_path = Path(results_dir) / out_name
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_results.to_csv(out_path, index=False, encoding="utf-8")
     logger.info(f"Results saved to: {out_path}")
 
     summary = {
-        "model": args.model,
-        "region": args.region,
-        "lang": args.lang,
+        "model": model,
+        "region": region,
+        "lang": lang,
         "total": total,
         "correct": correct,
         "errors": total_err,
         "accuracy": accuracy,
     }
-    summary_path = Path("results") / f"mcq_eval_summary_{args.region}_{args.lang}_{model_tag}.txt"
+    summary_path = Path(results_dir) / f"mcq_eval_summary_{region}_{lang}_{model_tag}.txt"
     with open(summary_path, "w") as f:
-        lines = [f"{k}: {v}" for k, v in summary.items()]
+        lines = [f"{k}: {v}\n" for k, v in summary.items()]
         f.writelines(lines)
     logger.info(f"Summary saved to: {summary_path}")
+
+    return summary
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="eval_mcq",
+        description="LatamQA evaluation script for MCQ datasets.",
+        epilog="See <https://github.com/Inria-Chile/LatamQA> for additional information.",
+    )
+    parser.add_argument(
+        "--model",
+        required=True,
+        help="Model name to evaluate (e.g., 'gpt-4o', 'ollama/llama3.1', 'anthropic/claude-3') see <https://docs.litellm.ai/docs/providers> for details.",  # noqa: E501
+    )
+    parser.add_argument("--region", choices=REGIONAL_DATASETS, default="es-la", help="Regional dataset selection")
+    parser.add_argument(
+        "--lang",
+        choices=TARGET_LANGUAGES,
+        default="regional",
+        help="Language: 'regional' for regional language, 'english' for English",
+    )
+    parser.add_argument("--max_results", type=int, default=None, help="Maximum number of rows to process")
+    parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
+    parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
+    parser.add_argument("--results_dir", type=str, default=Path().cwd() / "results", help="Folder for storing results")
+    parser.add_argument(
+        "--llm_api_key",
+        type=str,
+        default=None,
+        help="API key for LLM (if needed)",
+    )
+    parser.add_argument(
+        "--llm_uri",
+        type=str,
+        default=None,
+        help="URL for local/custom LLM provider (if needed)",
+    )
+
+    args = parser.parse_args()
+
+    logger.info("LatamQA multiple choice question (MCQ) evaluation (Universal)")
+
+    console = Console()
+
+    table: list[tuple[str, float | int | str]] = [
+        ("Model", args.model),
+        ("Region", args.region),
+        ("Language", args.lang),
+        ("Temperature", args.temperature),
+        ("Seed", args.seed),
+        ("Results directory", args.results_dir),
+    ]
+
+    if args.llm_api_key:
+        table.append(("LLM API key", "Provided"))
+    if args.llm_uri:
+        table.append(("LLM URI", args.llm_uri))
+    if args.max_results:
+        table.append(("Max. results", args.max_results))
+
+    if args.prompt_template:
+        table.append(("Custom prompt template", args.prompt_template))
+
+    config_df = pd.DataFrame(table, columns=["Configuration", "Value"])
+    console.print(Markdown("### Configuration"))
+    console.print(Markdown(config_df.to_markdown(index=False)))
+
+    summary = run_evaluation(
+        model=args.model,
+        region=args.region,
+        lang=args.lang,
+        max_results=args.max_results,
+        seed=args.seed,
+        temperature=args.temperature,
+        prompt_template=args.prompt_template,
+        results_dir=args.results_dir,
+        llm_api_key=args.llm_api_key,
+        llm_uri=args.llm_uri,
+    )
+
+    results_table = [
+        ("Model", args.model),
+        ("Region", args.region),
+        ("Language", args.lang),
+        ("Temperature", args.temperature),
+        ("Seed", args.seed),
+        ["Total", summary["total"]],
+        ["Correct", summary["correct"]],
+        ["Errors", summary["errors"]],
+        ["Accuracy", f"{summary['accuracy']:.6%}"],
+    ]
+
+    results_df = pd.DataFrame(results_table, columns=["Metric", "Value"])
+    console.print(Markdown("### Evaluation results"))
+    console.print(Markdown(results_df.to_markdown(index=False)))
 
 
 if __name__ == "__main__":

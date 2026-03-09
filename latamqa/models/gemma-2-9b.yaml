@@ -1,0 +1,5 @@
+LiteLLM model name: ollama/gemma2:9b
+Model name: google/gemma-2-9b-it
+Model URL: https://huggingface.co/google/gemma-2-9b-it
+Model size: 9B
+Model type: small

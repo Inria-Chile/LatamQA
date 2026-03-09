@@ -1,0 +1,5 @@
+LiteLLM model name: ollama/qwen2:14b
+Model name: Qwen/Qwen2.5-14B-Instruct
+Model URL: https://huggingface.co/Qwen/Qwen2.5-14B-Instruct
+Model size: 14B
+Model type: medium
