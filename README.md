@@ -5,8 +5,8 @@
 
 ## Dataset composition
 
-* MCQ in Latam Spanish, Iberian Spanish, Brasilian Portuguese. Every file has the English version
-* Metadata and content of the Wikipedia articles
+* MCQ in Latam Spanish, Iberian Spanish, Brazilian Portuguese. Every file has the English version.
+* Metadata and content of the Wikipedia articles.
 
 ### Online `LatamQA` datasets
 
@@ -34,18 +34,45 @@ dataset_as_df = dataset["train"].to_pandas()
 
 <span name="leaderboard">
 
-| Model name                                                                             | Ref.                                                       | Size   | # params   | Comments      | Average    | es-la (regional)   | es-la (english)   | es-es (regional)   | es-es (english)   | pt-br (regional)   | pt-br (english)   |
-|:---------------------------------------------------------------------------------------|:-----------------------------------------------------------|:-------|:-----------|:--------------|:-----------|:-------------------|:------------------|:-------------------|:------------------|:-------------------|:------------------|
-| [Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)                | [🔗](https://arxiv.org/abs/2407.21783)                     | small  | 8B         |               | 0.7038     | 0.6920             | 0.6450            | 0.7600             | 0.8050            | 0.6590             | 0.6620            |
-| [Mistral Small 3.1](mistralai/Mistral-Small-3.1-24B-Instruct-2503)                     | [🔗](https://arxiv.org/abs/2601.08584)                     | small  | 24B        |               | 0.7860     | 0.7850             | 0.7610            | 0.8430             | 0.8140            | 0.7700             | 0.7430            |
-| [Qwen2.5-14B](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct)                        | [🔗](https://arxiv.org/abs/2407.10671)                     | medium | 14B        |               | 0.7013     | 0.6880             | 0.6750            | 0.7910             | 0.7820            | 0.6510             | 0.6210            |
-| [GPT-4.1-mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)             | [🔗](https://openai.com/index/gpt-4-1/)                    | medium | ??         |               | 0.8148     | 0.8150             | 0.7820            | **0.8800**         | 0.8510            | 0.8000             | 0.7610            |
-| [Mistral Medium 3](https://docs.mistral.ai/models/mistral-medium-3-1-25-08)            |                                                            | medium | ??         |               | 0.8355     | 0.8390             | 0.8050            | 0.8710             | 0.8540            | 0.8260             | 0.8180            |
-| [LatamGPT](https://huggingface.co/latam-gpt/models)                                    | [🔗](https://www.latamgpt.org)                             | medium | 70B        | Latam focus   | 0.3570     | 0.4830             | 0.3700            | 0.3780             | 0.2970            | 0.2800             | 0.3340            |
-| Qwen3-430B                                                                             | [🔗](https://arxiv.org/abs/2505.09388)                     | large  | 430B       |               | 0.7635     | 0.7580             | 0.7400            | 0.8370             | 0.8240            | 0.7080             | 0.7140            |
-| [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)                 | [🔗](https://moonshotai.github.io/Kimi-K2/thinking.html)   | large  | 1T         |               | 0.7328     | 0.7160             | 0.7090            | 0.8100             | 0.7610            | 0.6960             | 0.7050            |
-| [Mistral Large 3](https://huggingface.co/mistralai/Mistral-Large-3-675B-Instruct-2512) | [🔗](https://docs.mistral.ai/models/mistral-large-3-25-12) | large  | 675B       |               | **0.8475** | **0.8540**         | **0.8180**        | 0.8760             | **0.8640**        | **0.8430**         | **0.8300**        |
-| [patagonIA](https://patagoniaia.cl)                                                    | [🔗](https://patagoniaia.cl/)                              | ??     | ??         | Chilean focus | 0.8188     | 0.8200             | 0.7920            | 0.8690             | 0.8490            | 0.8150             | 0.7680            |
+| Model name                                                                                  | Ref.                                                       | Size   | # params   | Comments      | Average    | es-la (regional)   | es-la (english)   | es-es (regional)   | es-es (english)   | pt-br (regional)   | pt-br (english)   |
+|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------|:-------|:-----------|:--------------|:-----------|:-------------------|:------------------|:-------------------|:------------------|:-------------------|:------------------|
+| [Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)                     | [🔗](https://arxiv.org/abs/2407.21783)                     | small  | 8B         |               | 0.7038     | 0.6920             | 0.6450            | 0.7600             | 0.8050            | 0.6590             | 0.6620            |
+| [Mistral Small 3.1](mistralai/Mistral-Small-3.1-24B-Instruct-2503)                          | [🔗](https://arxiv.org/abs/2601.08584)                     | small  | 24B        |               | 0.7860     | 0.7850             | 0.7610            | 0.8430             | 0.8140            | 0.7700             | 0.7430            |
+| [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) | [🔗](https://arxiv.org/abs/2407.21783)                     | small  | 8B         |               | 0.6250     | 0.7500             | 0.7500            | 0.7500             | 0.7500            | 0.2500             | 0.5000            |
+| [Qwen2.5-14B](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct)                             | [🔗](https://arxiv.org/abs/2407.10671)                     | medium | 14B        |               | 0.7013     | 0.6880             | 0.6750            | 0.7910             | 0.7820            | 0.6510             | 0.6210            |
+| [GPT-4.1-mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)                  | [🔗](https://openai.com/index/gpt-4-1/)                    | medium | ??         |               | 0.8148     | 0.8150             | 0.7820            | **0.8800**         | 0.8510            | 0.8000             | 0.7610            |
+| [Mistral Medium 3](https://docs.mistral.ai/models/mistral-medium-3-1-25-08)                 |                                                            | medium | ??         |               | 0.8355     | 0.8390             | 0.8050            | 0.8710             | 0.8540            | 0.8260             | 0.8180            |
+| [LatamGPT](https://huggingface.co/latam-gpt/models)                                         | [🔗](https://www.latamgpt.org)                             | medium | 70B        | Latam focus   | 0.3570     | 0.4830             | 0.3700            | 0.3780             | 0.2970            | 0.2800             | 0.3340            |
+| Qwen3-430B                                                                                  | [🔗](https://arxiv.org/abs/2505.09388)                     | large  | 430B       |               | 0.7635     | 0.7580             | 0.7400            | 0.8370             | 0.8240            | 0.7080             | 0.7140            |
+| [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)                      | [🔗](https://moonshotai.github.io/Kimi-K2/thinking.html)   | large  | 1T         |               | 0.7328     | 0.7160             | 0.7090            | 0.8100             | 0.7610            | 0.6960             | 0.7050            |
+| [Mistral Large 3](https://huggingface.co/mistralai/Mistral-Large-3-675B-Instruct-2512)      | [🔗](https://docs.mistral.ai/models/mistral-large-3-25-12) | large  | 675B       |               | **0.8475** | **0.8540**         | **0.8180**        | 0.8760             | **0.8640**        | **0.8430**         | **0.8300**        |
+| [patagonIA](https://patagoniaia.cl)                                                         | [🔗](https://patagoniaia.cl/)                              | ??     | ??         | Chilean focus | 0.8188     | 0.8200             | 0.7920            | 0.8690             | 0.8490            | 0.8150             | 0.7680            |
+
+</span>
+
+<span name="radar">
+
+```mermaid
+---
+title: LatamQA MCQ Leaderboard
+---
+radar-beta
+  axis a0["es-la (regional)"], a1["es-la (english)"], a2["es-es (regional)"], a3["es-es (english)"], a4["pt-br (regional)"], a5["pt-br (english)"]
+  curve c0["Mistral Large 3"]{0.854, 0.818, 0.876, 0.864, 0.843, 0.830}
+  curve c1["Mistral Medium 3"]{0.839, 0.805, 0.871, 0.854, 0.826, 0.818}
+  curve c2["patagonIA"]{0.820, 0.792, 0.869, 0.849, 0.815, 0.768}
+  curve c3["GPT-4.1-mini"]{0.815, 0.782, 0.880, 0.851, 0.800, 0.761}
+  curve c4["Mistral Small 3.1"]{0.785, 0.761, 0.843, 0.814, 0.770, 0.743}
+  curve c5["Qwen3-430B"]{0.758, 0.740, 0.837, 0.824, 0.708, 0.714}
+  curve c6["Kimi-K2-Thinking"]{0.716, 0.709, 0.810, 0.761, 0.696, 0.705}
+  curve c7["Llama-3.1-8B"]{0.692, 0.645, 0.760, 0.805, 0.659, 0.662}
+  curve c8["Qwen2.5-14B"]{0.688, 0.675, 0.791, 0.782, 0.651, 0.621}
+  curve c9["meta-llama/Llama-3.1-8B-Instruct"]{0.750, 0.750, 0.750, 0.750, 0.250, 0.500}
+  curve c10["LatamGPT"]{0.483, 0.370, 0.378, 0.297, 0.280, 0.334}
+
+  max 1
+  min 0
+```
 
 </span>
 
@@ -220,32 +247,31 @@ The `leaderboard.py` script provides several commands to manage the leaderboard:
 
 If this work was useful please cite it as:
 
-> Karmim, Y., Pino, R., Contreras, H., Lira, H., Cifuentes, S., Escoffier, S., Martí, L., Seddah, D., & Barriere, V. (2026). **Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America**. In Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026). Rabbat, Morocco. [⟨hal-05510068⟩](https:/.hal.science/hal-05510068).
+> Karmim, Y., Pino, R., Contreras, H., Lira, H., Cifuentes, S., Escoffier, S., Martí, L., Seddah, D., & Barriere, V. (2026). **Leveraging wikidata for geographically informed sociocultural bias dataset creation: Application to Latin America.** Proceedings of the First Workshop on Multilingual Multicultural Evaluation part of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026). Association for Computational Linguistics. 177–188. doi: [10.18653/v1/2026.mme-main.11](https://doi.org/10.18653/v1/2026.mme-main.11) hal: [⟨hal-05510068⟩](https:/.hal.science/hal-05510068).
 
 BibTeX:
 
 ```bibtex
-@inproceedings{karmimleveraging2026,
-  title      = {
-    Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: {A}pplication to
-    {L}atin {A}merica
-  },
-  author     = {
-    Karmim, Yannis and Pino, Renato and Contreras, Hernan and Lira, Hernan and Cifuentes, Sebastien and
-    Escoffier, Simon and Mart\'{i}, Luis and Seddah, Djam{\'e} and Barri{\`e}re, Valentin
-  },
+@inproceedings{karmim2026:leveraging,
+  title      = {Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: 
+                {A}pplication to {L}atin {A}merica},
+  author     = {Karmim, Yannis and Pino, Renato and Contreras, Hernan and Lira, Hernan and 
+                Cifuentes, Sebastien and Escoffier, Simon and Mart\'{i}, Luis and Seddah, Djam{\'e} and 
+                Barri{\`e}re, Valentin},
   year       = 2026,
   month      = {Mar},
-  booktitle  = {
-    Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the
-    European Chapter of the Association for Computational Linguistics (EACL'2026)
-  },
+  booktitle  = {Proceedings of the First Workshop on Multilingual Multicultural Evaluation part of the 
+                19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026)},
+  publisher  = {Association for Computational Linguistics},
+  location   = {Stroudsburg, PA, USA},
+  eventtitle = {Proceedings of the First Workshop on Multilingual Multicultural Evaluation},
+  venue      = {Rabat, Morocco},
+  pages      = {177--188},
+  doi        = {10.18653/v1/2026.mme-main.11},
   address    = {Rabbat, Morocco},
   url        = {https://inria.hal.science/hal-05510068},
-  editor     = {
-    Pinzhen Chen and Vil\'{e}m Zouhar and Hanxu Hu and Simran Khanuja and Wenhao Zhu and Barry Haddow and
-    Alexandra Birch and Alham Fikri Aji and Rico Sennrich and Sara Hooker
-  },
+  editor     = {Pinzhen Chen and Vil\'{e}m Zouhar and Hanxu Hu and Simran Khanuja and Wenhao Zhu and 
+                Barry Haddow and Alexandra Birch and Alham Fikri Aji and Rico Sennrich and Sara Hooker},
   hal_id     = {hal-05510068},
   hal_version = {v1},
   eprint     = {hal-05510068},
