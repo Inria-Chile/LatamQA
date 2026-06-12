@@ -55,6 +55,23 @@ dataset_as_df = dataset["train"].to_pandas()
 ```mermaid
 ---
 title: LatamQA MCQ Leaderboard
+config:
+  width: 1000
+  height: 1000
+  theme: redux
+  themeVariables:
+    radar:
+      curveOpacity: 0.05
+      legendBoxSize: 100
+      legendFontSize: 12
+      graticuleOpacity: 0.9
+      axisOpacity: 0.29
+      ticks: 10
+  radar:
+      axisScaleFactor: 0.8
+      axisLabelFactor: 0.92
+      curveTension: 0.092
+      ticks: 10
 ---
 radar-beta
   axis a0["es-la (regional)"], a1["es-la (english)"], a2["es-es (regional)"], a3["es-es (english)"], a4["pt-br (regional)"], a5["pt-br (english)"]
@@ -70,7 +87,7 @@ radar-beta
   curve c9["meta-llama/Llama-3.1-8B-Instruct"]{0.750, 0.750, 0.750, 0.750, 0.250, 0.500}
   curve c10["LatamGPT"]{0.483, 0.370, 0.378, 0.297, 0.280, 0.334}
 
-  max 1
+  max 1.2
   min 0
 ```
 

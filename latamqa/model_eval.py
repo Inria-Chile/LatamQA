@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+from datetime import datetime, timezone
 from itertools import product
 from pathlib import Path
 
@@ -12,9 +13,8 @@ from rich.console import Console
 from rich.markdown import Markdown
 from structlog import get_logger
 from tqdm.auto import tqdm
-from datetime import datetime, timezone
 
-from latamqa.eval_mcq import REGIONAL_DATASETS, TARGET_LANGUAGES, run_evaluation, DEFAULT_RESULTS_DIR
+from latamqa.eval_mcq import DEFAULT_RESULTS_DIR, REGIONAL_DATASETS, TARGET_LANGUAGES, run_evaluation
 
 logger = get_logger(__name__)
 

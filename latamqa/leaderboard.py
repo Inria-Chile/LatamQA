@@ -18,7 +18,30 @@ LEADERBOARD_DATASET = "inria-chile/latamqa-leaderboard"
 README_FILE = Path(__file__).parent.parent / "README.md"
 
 # Every region/language combination that a complete evaluation must cover.
-EXPECTED_SLICES = [f"{region} ({lang})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
+EXPECTED_SLICES = [f"{region} ({lang[:2]})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
+
+MERMAID_HEADER = """```mermaid
+---
+title: LatamQA MCQ Leaderboard
+config:
+  width: 1000
+  height: 1000
+  theme: redux
+  themeVariables:
+    radar:
+      curveOpacity: 0.05
+      legendBoxSize: 100
+      legendFontSize: 12
+      graticuleOpacity: 0.9
+      axisOpacity: 0.29
+      ticks: 10
+  radar:
+      axisScaleFactor: 0.8
+      axisLabelFactor: 0.92
+      curveTension: 0.092
+      ticks: 10
+---
+radar-beta"""
 
 
 def load_results(model: dict, results_dir: str | Path) -> dict:
@@ -431,13 +454,13 @@ def get_leaderboard_mermaid_radar() -> str:
     axis_keys = [f"a{i}" for i in range(len(existing_accuracy_cols))]
     axis_defs = ", ".join(f'{key}["{label}"]' for key, label in zip(axis_keys, existing_accuracy_cols))
 
-    lines = ["```mermaid", "---", "title: LatamQA MCQ Leaderboard", "---", "radar-beta", f"  axis {axis_defs}"]
+    lines = [MERMAID_HEADER, f"  axis {axis_defs}"]
 
     for i, row in latest_results.iterrows():
         values = ", ".join(f"{v:.3f}" if pd.notna(v) else "0" for v in row[existing_accuracy_cols])
         lines.append(f'  curve c{i}["{row["Model name"]}"]{{{values}}}')
 
-    lines += ["", "  max 1", "  min 0", "```"]
+    lines += ["", "  max 1.2", "  min 0", "```"]
 
     return "\n".join(lines)
 
