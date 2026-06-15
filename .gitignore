@@ -209,3 +209,5 @@ __marimo__/
 results/
 .DS_Store
 uv.lock
+
+.understand-anything
