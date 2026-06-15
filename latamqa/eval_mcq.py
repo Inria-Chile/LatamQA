@@ -4,6 +4,7 @@ Universal script to evaluate models through API (OpenAI, Mistral, Anthropic, Oll
 """
 
 import argparse
+import os
 import random
 import re
 from pathlib import Path
@@ -13,11 +14,14 @@ import pandas as pd
 import structlog
 from datasets import load_dataset
 from litellm import completion
+from litellm.exceptions import APIConnectionError, APIError, AuthenticationError, BadRequestError, RateLimitError, Timeout
 from rich.console import Console
 from rich.markdown import Markdown
 from tqdm.auto import tqdm
 
 logger = structlog.get_logger()
+
+DEFAULT_RESULTS_DIR = Path(__file__).parent.parent / "results"
 
 DEFAULT_PROPMT_TEMPLATE: str = """"Answer the following multiple-choice question by selecting ONLY the letter (A, B, C, or D) of the correct answer.
 
@@ -113,8 +117,36 @@ def evaluate_mcq(
     if llm_uri:
         kwargs["api_base"] = llm_uri
 
-    resp = completion(**kwargs)
-    return resp.choices[0].message.content.strip()  # type: ignore
+    try:
+        resp = completion(**kwargs)
+        return resp.choices[0].message.content.strip()  # type: ignore
+    except AuthenticationError as e:
+        logger.fatal("Invalid API key: {e}")
+        exit(-1)
+
+    except RateLimitError as e:
+        logger.fatal("Rate limit exceeded: {e}")
+        exit(-1)
+
+    except Timeout as e:
+        logger.fatal("Request timed out: {e}")
+        exit(-1)
+
+    except BadRequestError as e:
+        logger.fatal("Bad request: {e}")
+        exit(-1)
+
+    except APIConnectionError as e:
+        logger.fatal(f"Connection error: {e}")
+        exit(-1)
+
+    except APIError as e:
+        logger.fatal(f"Provider API error: {e}")
+        exit(-1)
+
+    except Exception as e:
+        logger.error(f"Unexpected error: {type(e).__name__}: {e}")
+        exit(-1)
 
 
 def run_evaluation(
@@ -125,11 +157,17 @@ def run_evaluation(
     seed: int = 42,
     temperature: float = 0.0,
     prompt_template: str | None = None,
-    results_dir: str | Path = Path().cwd() / "results",
+    results_dir: str | Path | None = None,
     llm_api_key: str | None = None,
     llm_uri: str | None = None,
 ):
     """Run the MCQ evaluation."""
+
+    if results_dir is None:
+        logger.info(f"No results directory specified, using default: {DEFAULT_RESULTS_DIR}")
+        results_dir = DEFAULT_RESULTS_DIR
+
+    os.makedirs(results_dir, exist_ok=True)
 
     dataset_name = f"inria-chile/latamqa_mcq_{region}"
 
@@ -159,7 +197,7 @@ def run_evaluation(
     else:
         prompt_template = DEFAULT_PROPMT_TEMPLATE
 
-    for item in tqdm(data, desc=f"Evaluating «{dataset_name}»"):
+    for item in tqdm(data, desc=f"Evaluating «{dataset_name}»", leave=False):
         question = item[q]
         row_seed = seed + hash(str(item["article_id"])) % 10000
         options, correct_letter = shuffle_options(item[a], item[d1], item[d2], item[d3], row_seed)
@@ -265,7 +303,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
     parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
     parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
-    parser.add_argument("--results_dir", type=str, default=Path().cwd() / "results", help="Folder for storing results")
+    parser.add_argument("--results_dir", type=str, default=DEFAULT_RESULTS_DIR, help="Folder for storing results")
     parser.add_argument(
         "--llm_api_key",
         type=str,
