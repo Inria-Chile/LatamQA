@@ -43,15 +43,15 @@ Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creat
 ---
 title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better visibility)
 config:
-  width: 600
-  height: 600
+  width: 740
+  height: 740
   theme: neo
   themeVariables:
     radar:
       curveOpacity: 0.29
       graticuleOpacity: 0.11
       legendBoxSize: 150
-      legendFontSize: 11
+      legendFontSize: 11pt
   radar:
       axisScaleFactor: 0.83
       axisLabelFactor: 0.83
