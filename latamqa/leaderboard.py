@@ -14,32 +14,36 @@ from latamqa.model_eval import MODELS_DIR, list_models, load_models
 
 logger = get_logger(__name__)
 
-LEADERBOARD_DATASET = "inria-chile/latamqa-leaderboard"
+LEADERBOARD_DATASET = "inria-chile/leaderboard-latamqa"
 README_FILE = Path(__file__).parent.parent / "README.md"
 
 # Every region/language combination that a complete evaluation must cover.
 EXPECTED_SLICES = [f"{region} ({lang[:2]})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
+
+# Accuracy column names as stored on the Hub and rendered in the README/plots,
+# e.g. "es-la (regional)", "es-la (english)", ... (full language names).
+ACCURACY_COLUMNS = [f"{region} ({lang})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
 
 MERMAID_HEADER = """```mermaid
 ---
 title: LatamQA MCQ Leaderboard
 config:
   width: 1000
-  height: 1000
-  theme: redux
+  height: 600
+  theme: neo
   themeVariables:
+    mainBkg: '#0d1117',
+    background: '#161b22'
     radar:
-      curveOpacity: 0.05
-      legendBoxSize: 100
-      legendFontSize: 12
-      graticuleOpacity: 0.9
-      axisOpacity: 0.29
+      curveOpacity: 0.11
+      legendFontSize: 8
+      graticuleOpacity: 0.11
+      axisOpacity: 0.9
       ticks: 10
   radar:
-      axisScaleFactor: 0.8
-      axisLabelFactor: 0.92
+      axisScaleFactor: 0.83
+      axisLabelFactor: 0.83
       curveTension: 0.092
-      ticks: 10
 ---
 radar-beta"""
 
@@ -123,14 +127,6 @@ def update_leaderboard(
 
     model = models[model_name]
 
-    try:
-        dataset = load_dataset(LEADERBOARD_DATASET)
-        df = dataset["train"].to_pandas()
-        logger.info(f"Loaded existing results from Hugging Face dataset '{LEADERBOARD_DATASET}'.")
-    except Exception as e:
-        logger.warning(f"Could not load dataset '{LEADERBOARD_DATASET}'. Creating a new one. Error: {e}")
-        df = pd.DataFrame()
-
     logger.info(f"Updating leaderboard results for model: {model_name} from results directory: {results_dir}")
 
     results = load_results(model, results_dir=results_dir)
@@ -146,38 +142,129 @@ def update_leaderboard(
             return
         logger.warning(f"{message}. Proceeding anyway because allow_incomplete is set.")
 
-    entry = {**results, **models[model_name], "timestamp": pd.Timestamp.now()}
+    entry = {**results, **model, "timestamp": pd.Timestamp.now()}
+    _append_entry_and_push(entry, dry_run=dry_run, label=f"'{model_name}'")
 
-    df = pd.concat([df, pd.DataFrame(data=[entry])], ignore_index=True)  # Convert timestamp to string for serialization
-    if "timestamp" in df.columns:
+
+def add_manual_entry(
+    accuracies: dict[str, float] | None = None,
+    metadata: dict | None = None,
+    model_name: str | None = None,
+    dry_run: bool = False,
+    allow_incomplete: bool = False,
+):
+    """Adds a leaderboard entry from manually supplied accuracies and metadata.
+
+    Unlike :func:`update_leaderboard`, this reads nothing from disk — you pass
+    the per-slice accuracies and the model's metadata directly. Handy for adding
+    results reported in a paper or produced outside the standard pipeline.
+
+    Args:
+        accuracies: Mapping of slice name to accuracy, e.g.
+            ``{"es-la (regional)": 0.81, "es-la (english)": 0.78, ...}``. Valid
+            keys are listed in :data:`ACCURACY_COLUMNS`; unknown keys are rejected.
+        metadata: Leaderboard metadata fields, e.g. ``{"Model name": "GPT-5",
+            "Model URL": "...", "Model size": "?", "Model type": "large",
+            "Paper URL": "...", "Comments": "..."}``. ``Model name`` is required.
+        model_name: Optional model id matching a YAML config in the models dir.
+            Its fields seed the metadata; anything in ``metadata`` overrides them.
+        dry_run: Build everything but skip the push to the Hub.
+        allow_incomplete: Allow missing accuracy slices (otherwise abort).
+    """
+    accuracies = dict(accuracies or {})
+    metadata = dict(metadata or {})
+
+    # Seed metadata from a YAML model config when a known model id is given.
+    if model_name is not None:
+        models = load_models(MODELS_DIR)
+        if model_name not in models:
+            logger.error(f"Model '{model_name}' not found. Available models: {', '.join(models.keys())}")
+            return
+        metadata = {**models[model_name], **metadata}
+
+    # Reject unknown accuracy slice names to catch typos early.
+    unknown = [key for key in accuracies if key not in ACCURACY_COLUMNS]
+    if unknown:
+        logger.error(f"Unknown accuracy slice(s): {', '.join(unknown)}. Valid slices: {', '.join(ACCURACY_COLUMNS)}.")
+        return
+
+    if not metadata.get("Model name"):
+        logger.error("A 'Model name' is required in metadata (it keys the leaderboard).")
+        return
+
+    # Coerce provided accuracies to float so a stray string fails loudly here.
+    try:
+        accuracies = {key: float(value) for key, value in accuracies.items()}
+    except (TypeError, ValueError) as e:
+        logger.error(f"Accuracies must be numeric: {e}")
+        return
+
+    missing = [slice_name for slice_name in ACCURACY_COLUMNS if slice_name not in accuracies]
+    if missing:
+        message = (
+            f"Manual entry for '{metadata['Model name']}' is missing {len(missing)} of "
+            f"{len(ACCURACY_COLUMNS)} slices: {', '.join(missing)}"
+        )
+        if not allow_incomplete:
+            logger.error(f"{message}. Aborting (pass allow_incomplete=True / --allow_incomplete to override).")
+            return
+        logger.warning(f"{message}. Proceeding anyway because allow_incomplete is set.")
+
+    entry = {**metadata, **accuracies, "timestamp": pd.Timestamp.now()}
+    _append_entry_and_push(entry, dry_run=dry_run, label=f"'{metadata['Model name']}' (manual)")
+
+
+def _append_entry_and_push(entry: dict, dry_run: bool = False, label: str = ""):
+    """Appends a single ``entry`` to the leaderboard dataset and pushes it.
+
+    Loads the current dataset (or starts a fresh one), normalises the
+    ``timestamp`` column for serialisation, and pushes to the Hub unless
+    ``dry_run`` is set.
+    """
+    try:
+        dataset = load_dataset(LEADERBOARD_DATASET)
+        df: pd.DataFrame = dataset["train"].to_pandas()  # type: ignore
+        logger.info(f"Loaded existing results from Hugging Face dataset '{LEADERBOARD_DATASET}'.")
+    except Exception as e:
+        logger.warning(f"Could not load dataset '{LEADERBOARD_DATASET}'. Creating a new one. Error: {e}")
+        df = pd.DataFrame()
+
+    df = pd.concat([df, pd.DataFrame(data=[entry])], ignore_index=True)
+    if "timestamp" in df.columns:  # Convert timestamp to string for serialization.
         df["timestamp"] = df["timestamp"].astype(str)
 
-    new_dataset = Dataset.from_pandas(df)
-
     if dry_run:
-        logger.warn(f"dry-run==True; skipping push to '{LEADERBOARD_DATASET}'. Would add entry for '{model_name}': {results}")
+        logger.warn(f"dry-run==True; skipping push to '{LEADERBOARD_DATASET}'. Would add entry {label}: {entry}")
         return
 
     try:
-        new_dataset.push_to_hub(LEADERBOARD_DATASET, private=False)
-        logger.info(f"Leaderboard updated on Hugging Face Hub for '{model_name}'.")
+        Dataset.from_pandas(df).push_to_hub(LEADERBOARD_DATASET, private=False)
+        logger.info(f"Leaderboard updated on Hugging Face Hub{f' for {label}' if label else ''}.")
     except Exception as e:
         logger.error(
             f"Failed to push to Hugging Face Hub. Please ensure you are logged in (`huggingface-cli login`). Error: {e}"
         )
 
 
-def get_leaderboard_markdown() -> str:
-    """Generates the leaderboard as a Markdown table."""
+def get_current_leaderboard() -> pd.DataFrame:
     try:
         dataset = load_dataset(LEADERBOARD_DATASET)
-        df = dataset["train"].to_pandas()
+        df: pd.DataFrame = dataset["train"].to_pandas()  # type: ignore
     except Exception as e:
-        logger.warning(f"Could not load dataset '{LEADERBOARD_DATASET}'. Run an update to create it. Error: {e}")
-        return ""
+        logger.error(f"Could not load dataset '{LEADERBOARD_DATASET}'. Run an update to create it. Error: {e}")
+        exit(-1)
 
     # Keep only the latest entry for each model based on the timestamp, and sort by Model type if available.
     latest_results = df.sort_values("timestamp").groupby("Model name").tail(1)
+    latest_results = latest_results[latest_results.show_in_leaderboard]
+
+    return latest_results
+
+
+def get_leaderboard_markdown() -> str:
+    """Generates the leaderboard as a Markdown table."""
+
+    latest_results = get_current_leaderboard()
 
     if "Model type" in latest_results.columns:
         model_type_order = ["small", "medium", "large"]
@@ -232,7 +319,7 @@ def get_leaderboard_markdown() -> str:
 
             display_df[col] = numeric_col.apply(highlight_max)
 
-    display_columns = ["Model name", "Ref.", "Size", "# params", "Comments", "Average"] + accuracy_columns
+    display_columns = ["Model name", "Ref.", "Size", "# params", "Comments", "Average", *accuracy_columns]
     display_df = display_df[[col for col in display_columns if col in display_df.columns]]
 
     return display_df.to_markdown(index=False)
@@ -285,6 +372,7 @@ def show_leaderboard():
     """Displays the latest leaderboard results for each model."""
     leaderboard_md = get_leaderboard_markdown()
     if not leaderboard_md:
+        logger.warning("Leaderboard is empty, cannot display.")
         return
 
     console = Console()
@@ -305,7 +393,7 @@ def plot_leaderboard(results_dir: str | Path = Path().cwd() / "results"):
 
     try:
         dataset = load_dataset(LEADERBOARD_DATASET)
-        df = dataset["train"].to_pandas()
+        df: pd.DataFrame = dataset["train"].to_pandas()  # type: ignore
     except Exception as e:
         logger.warning(f"Could not load dataset '{LEADERBOARD_DATASET}'. Run an update to create it. Error: {e}")
         return
@@ -428,14 +516,7 @@ def get_leaderboard_mermaid_radar() -> str:
     (Mermaid >= 11.6), with one axis per region/language slice and one curve
     per model. Returns an empty string when no leaderboard data is available.
     """
-    try:
-        dataset = load_dataset(LEADERBOARD_DATASET)
-        df = dataset["train"].to_pandas()
-    except Exception as e:
-        logger.warning(f"Could not load dataset '{LEADERBOARD_DATASET}'. Run an update to create it. Error: {e}")
-        return ""
-
-    latest_results = df.sort_values("timestamp").groupby("Model name").tail(1)
+    latest_results = get_current_leaderboard()
 
     accuracy_columns = [f"{region} ({lang})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
     existing_accuracy_cols = [col for col in accuracy_columns if col in latest_results.columns]
@@ -469,7 +550,8 @@ def show_leaderboard_radar():
     """Prints the leaderboard as a Mermaid radar chart block."""
     radar = get_leaderboard_mermaid_radar()
     if radar:
-        print(radar)
+        console = Console()
+        console.print(Markdown(radar))
 
 
 def main():
@@ -505,6 +587,38 @@ def main():
     plot_parser = subparsers.add_parser("plot", help="Generate a plot of the leaderboard.")
     plot_parser.add_argument("--results_dir", type=str, default=Path().cwd() / "results", help="Folder for storing results")
 
+    manual_parser = subparsers.add_parser(
+        "add-manual", help="Manually add a leaderboard entry from supplied accuracies and metadata."
+    )
+    manual_parser.add_argument("--model-name", help="Display name for the model (required unless --model is given).")
+    manual_parser.add_argument(
+        "--model",
+        dest="model_id",
+        help="Optional model ID whose YAML config seeds the metadata (e.g. 'gemma-2-2b'). Other flags override its fields.",
+    )
+    manual_parser.add_argument("--model-url", help="Link to the model's page.")
+    manual_parser.add_argument("--paper-url", help="Link to the model's paper.")
+    manual_parser.add_argument("--model-size", help='Parameter count, e.g. "8B".')
+    manual_parser.add_argument("--model-type", help='Category for sorting: "small", "medium" or "large".')
+    manual_parser.add_argument("--litellm-name", help="LiteLLM model identifier.")
+    manual_parser.add_argument("--comments", help="Free-text note shown in the leaderboard.")
+    manual_parser.add_argument(
+        "--accuracy",
+        action="append",
+        default=[],
+        metavar="SLICE=VALUE",
+        help=(
+            'Accuracy for one slice, e.g. --accuracy "es-la (regional)=0.81". '
+            "Repeat for each slice. Valid slices: " + ", ".join(ACCURACY_COLUMNS) + "."
+        ),
+    )
+    manual_parser.add_argument(
+        "--dry_run", action="store_true", help="Build the entry but do not push changes to the leaderboard dataset."
+    )
+    manual_parser.add_argument(
+        "--allow_incomplete", action="store_true", help="Push the entry even if some accuracy slices are missing."
+    )
+
     args = parser.parse_args()
 
     if args.command == "list":
@@ -524,6 +638,32 @@ def main():
         update_readme_with_leaderboard()
     elif args.command == "plot":
         plot_leaderboard(results_dir=args.results_dir)
+    elif args.command == "add-manual":
+        accuracies = {}
+        for item in args.accuracy:
+            slice_name, sep, value = item.partition("=")
+            if not sep:
+                parser.error(f"--accuracy expects SLICE=VALUE, got: {item!r}")
+            accuracies[slice_name.strip()] = value.strip()
+
+        metadata = {
+            "Model name": args.model_name,
+            "Model URL": args.model_url,
+            "Paper URL": args.paper_url,
+            "Model size": args.model_size,
+            "Model type": args.model_type,
+            "LiteLLM model name": args.litellm_name,
+            "Comments": args.comments,
+        }
+        metadata = {key: value for key, value in metadata.items() if value is not None}
+
+        add_manual_entry(
+            accuracies=accuracies,
+            metadata=metadata,
+            model_name=args.model_id,
+            dry_run=args.dry_run,
+            allow_incomplete=args.allow_incomplete,
+        )
 
 
 if __name__ == "__main__":

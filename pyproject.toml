@@ -2,7 +2,7 @@
 name = "LatamQA"
 version = "0.1.0"
 description = "Code for paper «Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America»."
-authors = [{ name = "Inria Chile and collaborators", email = "info@inria.cl" }]
+authors = [{ name = "Project LLACA", email = "info@inria.cl" }]
 requires-python = ">=3.12,<4.0"
 readme = "README.md"
 license = "mit"
@@ -68,3 +68,4 @@ norecursedirs = ".venv"
 [project.scripts]
 eval_mcq = "latamqa.eval_mcq:main"
 leaderboard = "latamqa.leaderboard:main"
+model_eval = "latamqa.model_eval:main"

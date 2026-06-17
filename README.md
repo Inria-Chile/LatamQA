@@ -34,19 +34,19 @@ dataset_as_df = dataset["train"].to_pandas()
 
 <span name="leaderboard">
 
-| Model name                                                                                  | Ref.                                                       | Size   | # params   | Comments      | Average    | es-la (regional)   | es-la (english)   | es-es (regional)   | es-es (english)   | pt-br (regional)   | pt-br (english)   |
-|:--------------------------------------------------------------------------------------------|:-----------------------------------------------------------|:-------|:-----------|:--------------|:-----------|:-------------------|:------------------|:-------------------|:------------------|:-------------------|:------------------|
-| [Llama-3.1-8B](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)                     | [🔗](https://arxiv.org/abs/2407.21783)                     | small  | 8B         |               | 0.7038     | 0.6920             | 0.6450            | 0.7600             | 0.8050            | 0.6590             | 0.6620            |
-| [Mistral Small 3.1](mistralai/Mistral-Small-3.1-24B-Instruct-2503)                          | [🔗](https://arxiv.org/abs/2601.08584)                     | small  | 24B        |               | 0.7860     | 0.7850             | 0.7610            | 0.8430             | 0.8140            | 0.7700             | 0.7430            |
-| [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) | [🔗](https://arxiv.org/abs/2407.21783)                     | small  | 8B         |               | 0.6250     | 0.7500             | 0.7500            | 0.7500             | 0.7500            | 0.2500             | 0.5000            |
-| [Qwen2.5-14B](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct)                             | [🔗](https://arxiv.org/abs/2407.10671)                     | medium | 14B        |               | 0.7013     | 0.6880             | 0.6750            | 0.7910             | 0.7820            | 0.6510             | 0.6210            |
-| [GPT-4.1-mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)                  | [🔗](https://openai.com/index/gpt-4-1/)                    | medium | ??         |               | 0.8148     | 0.8150             | 0.7820            | **0.8800**         | 0.8510            | 0.8000             | 0.7610            |
-| [Mistral Medium 3](https://docs.mistral.ai/models/mistral-medium-3-1-25-08)                 |                                                            | medium | ??         |               | 0.8355     | 0.8390             | 0.8050            | 0.8710             | 0.8540            | 0.8260             | 0.8180            |
-| [LatamGPT](https://huggingface.co/latam-gpt/models)                                         | [🔗](https://www.latamgpt.org)                             | medium | 70B        | Latam focus   | 0.3570     | 0.4830             | 0.3700            | 0.3780             | 0.2970            | 0.2800             | 0.3340            |
-| Qwen3-430B                                                                                  | [🔗](https://arxiv.org/abs/2505.09388)                     | large  | 430B       |               | 0.7635     | 0.7580             | 0.7400            | 0.8370             | 0.8240            | 0.7080             | 0.7140            |
-| [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)                      | [🔗](https://moonshotai.github.io/Kimi-K2/thinking.html)   | large  | 1T         |               | 0.7328     | 0.7160             | 0.7090            | 0.8100             | 0.7610            | 0.6960             | 0.7050            |
-| [Mistral Large 3](https://huggingface.co/mistralai/Mistral-Large-3-675B-Instruct-2512)      | [🔗](https://docs.mistral.ai/models/mistral-large-3-25-12) | large  | 675B       |               | **0.8475** | **0.8540**         | **0.8180**        | 0.8760             | **0.8640**        | **0.8430**         | **0.8300**        |
-| [patagonIA](https://patagoniaia.cl)                                                         | [🔗](https://patagoniaia.cl/)                              | ??     | ??         | Chilean focus | 0.8188     | 0.8200             | 0.7920            | 0.8690             | 0.8490            | 0.8150             | 0.7680            |
+| Model name                                                                                             | Ref.                                                                      | Size   | # params   | Comments         | Average    | es-la (regional)   | es-la (english)   | es-es (regional)   | es-es (english)   | pt-br (regional)   | pt-br (english)   |
+|:-------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|:-------|:-----------|:-----------------|:-----------|:-------------------|:------------------|:-------------------|:------------------|:-------------------|:------------------|
+| [Mistral-Small-3.1-24B-Instruct](https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503) | [🔗](https://arxiv.org/abs/2601.08584)                                    | small  | 24B        |                  | 0.7860     | 0.7850             | 0.7610            | 0.8430             | 0.8140            | 0.7700             | 0.7430            |
+| [Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)                       | [🔗](https://ai.meta.com/blog/meta-llama-3-1/)                            | small  | 8B         |                  | 0.6690     | 0.6840             | 0.6650            | 0.6800             | 0.6570            | 0.6720             | 0.6560            |
+| [Qwen2.5-14B](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct)                                        | [🔗](https://arxiv.org/abs/2407.10671)                                    | medium | 14B        |                  | 0.7013     | 0.6880             | 0.6750            | 0.7910             | 0.7820            | 0.6510             | 0.6210            |
+| [GPT-4.1-mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)                             | [🔗](https://openai.com/index/gpt-4-1/)                                   | medium | ??         |                  | 0.8148     | 0.8150             | 0.7820            | **0.8800**         | 0.8510            | 0.8000             | 0.7610            |
+| [Mistral-Medium-3.5-128B](https://huggingface.co/mistralai/Mistral-Medium-3.5-128B)                    | [🔗](https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04) | medium | 128B       |                  | 0.8048     | 0.8280             | 0.7820            | 0.8190             | 0.7940            | 0.8180             | 0.7880            |
+| [Llama-3.1-70B-LatamGPT-SFT-1.0](https://huggingface.co/latam-gpt/Llama-3.1-70B-LatamGPT-SFT-1.0)      | [🔗](https://www.latamgpt.org)                                            | medium | 70B        | Focused on Latam | 0.7390     | 0.7720             | 0.7330            | 0.7570             | 0.7190            | 0.7410             | 0.7120            |
+| [Llama 3.1-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                     | [🔗](https://ai.meta.com/blog/meta-llama-3-1/)                            | medium | 70B        |                  | 0.7707     | 0.8050             | 0.7660            | 0.7970             | 0.7690            | 0.7330             | 0.7540            |
+| [Qwen3-Coder-480B-A35B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct)           | [🔗](https://arxiv.org/abs/2505.09388)                                    | large  | 430B       |                  | 0.7635     | 0.7580             | 0.7400            | 0.8370             | 0.8240            | 0.7080             | 0.7140            |
+| [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)                                 | [🔗](https://moonshotai.github.io/Kimi-K2/thinking.html)                  | large  | 1T         |                  | 0.7328     | 0.7160             | 0.7090            | 0.8100             | 0.7610            | 0.6960             | 0.7050            |
+| [Mistral Large 3](https://huggingface.co/mistralai/Mistral-Large-3-675B-Instruct-2512)                 | [🔗](https://docs.mistral.ai/models/mistral-large-3-25-12)                | large  | 675B       |                  | **0.8475** | **0.8540**         | **0.8180**        | 0.8760             | **0.8640**        | **0.8430**         | **0.8300**        |
+| [patagonIA](https://patagoniaia.cl)                                                                    | [🔗](https://patagoniaia.cl/)                                             | ??     | ??         | Focused on Chile | 0.8188     | 0.8200             | 0.7920            | 0.8690             | 0.8490            | 0.8150             | 0.7680            |
 
 </span>
 
@@ -57,35 +57,35 @@ dataset_as_df = dataset["train"].to_pandas()
 title: LatamQA MCQ Leaderboard
 config:
   width: 1000
-  height: 1000
-  theme: redux
+  height: 600
+  theme: neo
   themeVariables:
+    mainBkg: #0d1117
+    background: #161b22
     radar:
-      curveOpacity: 0.05
-      legendBoxSize: 100
-      legendFontSize: 12
-      graticuleOpacity: 0.9
-      axisOpacity: 0.29
+      curveOpacity: 0.11
+      legendFontSize: 8
+      graticuleOpacity: 0.11
+      axisOpacity: 0.9
       ticks: 10
   radar:
-      axisScaleFactor: 0.8
-      axisLabelFactor: 0.92
+      axisScaleFactor: 0.83
+      axisLabelFactor: 0.83
       curveTension: 0.092
-      ticks: 10
 ---
 radar-beta
   axis a0["es-la (regional)"], a1["es-la (english)"], a2["es-es (regional)"], a3["es-es (english)"], a4["pt-br (regional)"], a5["pt-br (english)"]
   curve c0["Mistral Large 3"]{0.854, 0.818, 0.876, 0.864, 0.843, 0.830}
-  curve c1["Mistral Medium 3"]{0.839, 0.805, 0.871, 0.854, 0.826, 0.818}
-  curve c2["patagonIA"]{0.820, 0.792, 0.869, 0.849, 0.815, 0.768}
-  curve c3["GPT-4.1-mini"]{0.815, 0.782, 0.880, 0.851, 0.800, 0.761}
-  curve c4["Mistral Small 3.1"]{0.785, 0.761, 0.843, 0.814, 0.770, 0.743}
-  curve c5["Qwen3-430B"]{0.758, 0.740, 0.837, 0.824, 0.708, 0.714}
-  curve c6["Kimi-K2-Thinking"]{0.716, 0.709, 0.810, 0.761, 0.696, 0.705}
-  curve c7["Llama-3.1-8B"]{0.692, 0.645, 0.760, 0.805, 0.659, 0.662}
-  curve c8["Qwen2.5-14B"]{0.688, 0.675, 0.791, 0.782, 0.651, 0.621}
-  curve c9["meta-llama/Llama-3.1-8B-Instruct"]{0.750, 0.750, 0.750, 0.750, 0.250, 0.500}
-  curve c10["LatamGPT"]{0.483, 0.370, 0.378, 0.297, 0.280, 0.334}
+  curve c1["patagonIA"]{0.820, 0.792, 0.869, 0.849, 0.815, 0.768}
+  curve c2["GPT-4.1-mini"]{0.815, 0.782, 0.880, 0.851, 0.800, 0.761}
+  curve c3["Mistral-Medium-3.5-128B"]{0.828, 0.782, 0.819, 0.794, 0.818, 0.788}
+  curve c4["Mistral-Small-3.1-24B-Instruct"]{0.785, 0.761, 0.843, 0.814, 0.770, 0.743}
+  curve c5["Llama 3.1-70B-Instruct"]{0.805, 0.766, 0.797, 0.769, 0.733, 0.754}
+  curve c6["Qwen3-Coder-480B-A35B-Instruct"]{0.758, 0.740, 0.837, 0.824, 0.708, 0.714}
+  curve c7["Llama-3.1-70B-LatamGPT-SFT-1.0"]{0.772, 0.733, 0.757, 0.719, 0.741, 0.712}
+  curve c8["Kimi-K2-Thinking"]{0.716, 0.709, 0.810, 0.761, 0.696, 0.705}
+  curve c9["Qwen2.5-14B"]{0.688, 0.675, 0.791, 0.782, 0.651, 0.621}
+  curve c10["Llama-3.1-8B-Instruct"]{0.684, 0.665, 0.680, 0.657, 0.672, 0.656}
 
   max 1.2
   min 0
