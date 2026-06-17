@@ -284,7 +284,7 @@ def get_leaderboard_markdown() -> str:
 
     # Create the linked model name column
     if "Model URL" in display_df.columns and "Model name" in display_df.columns:
-        display_df["Model"] = display_df.apply(
+        display_df["Model name"] = display_df.apply(
             lambda row: (
                 f"[{row['Model name']}]({row['Model URL']})" if pd.notna(row.get("Model URL")) else row.get("Model name", "N/A")
             ),
@@ -324,7 +324,7 @@ def get_leaderboard_markdown() -> str:
 
             display_df[col] = numeric_col.apply(highlight_max)
 
-    display_columns = ["Model name", "Ref.", "Size", "# params", "Comments", "Average", *accuracy_columns]
+    display_columns = ["Model name", "Size", "Comments", "Average", *accuracy_columns]
     display_df = display_df[[col for col in display_columns if col in display_df.columns]]
 
     return display_df.to_markdown(index=False)
