@@ -284,26 +284,24 @@ def get_leaderboard_markdown() -> str:
 
     # Create the linked model name column
     if "Model URL" in display_df.columns and "Model name" in display_df.columns:
-        display_df["Model name"] = display_df.apply(
+        display_df["Model"] = display_df.apply(
             lambda row: (
                 f"[{row['Model name']}]({row['Model URL']})" if pd.notna(row.get("Model URL")) else row.get("Model name", "N/A")
             ),
             axis=1,
         )
 
-    # Fill missing Model type and Model size with ?
-    if "Model type" in display_df.columns:
-        display_df["Size"] = display_df["Model type"].astype(object).fillna("??")
-    if "Model size" in display_df.columns:
-        display_df["# params"] = display_df["Model size"].fillna("??")
+    display_df["Size"] = (
+        display_df["Model type"].astype(object).fillna("N/A") + " (" + display_df["Model size"].fillna("??") + ")"
+    )
 
     # Replace NaN with empty string in Comments
     if "Comments" in display_df.columns:
         display_df["Comments"] = display_df["Comments"].fillna("")
 
     # Create the Paper link column
-    if "Paper URL" in display_df.columns:
-        display_df["Ref."] = display_df["Paper URL"].apply(lambda url: f"[🔗]({url})" if pd.notna(url) and url else "")
+    # if "Paper URL" in display_df.columns:
+    #    display_df["Ref."] = display_df["Paper URL"].apply(lambda url: f"[🔗]({url})" if pd.notna(url) and url else "")
 
     accuracy_columns = [f"{region} ({lang})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
     existing_accuracy_cols = [col for col in accuracy_columns if col in display_df.columns]
