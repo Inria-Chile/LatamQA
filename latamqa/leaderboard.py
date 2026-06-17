@@ -24,28 +24,34 @@ EXPECTED_SLICES = [f"{region} ({lang[:2]})" for region, lang in product(REGIONAL
 # e.g. "es-la (regional)", "es-la (english)", ... (full language names).
 ACCURACY_COLUMNS = [f"{region} ({lang})" for region, lang in product(REGIONAL_DATASETS, TARGET_LANGUAGES)]
 
-MERMAID_HEADER = """```mermaid
+MERMAID_HEADER = """
+```mermaid
 ---
-title: LatamQA MCQ Leaderboard
+title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better visibility)
 config:
-  width: 1000
+  width: 600
   height: 600
-  theme: neo
+  theme: forest
   themeVariables:
-    mainBkg: '#0d1117',
-    background: '#161b22'
     radar:
-      curveOpacity: 0.11
-      legendFontSize: 8
+      curveOpacity: 0.29
       graticuleOpacity: 0.11
-      axisOpacity: 0.9
-      ticks: 10
+      legendBoxSize: 150
+      legendFontSize: 11
   radar:
       axisScaleFactor: 0.83
       axisLabelFactor: 0.83
+      axisLabelFontSize: 11pt
       curveTension: 0.092
 ---
 radar-beta"""
+
+MERMAID_FOOTER = """
+  max 1.0
+  min 0.6
+  ticks 4
+  showLegend true
+```"""
 
 
 def load_results(model: dict, results_dir: str | Path) -> dict:
@@ -541,9 +547,7 @@ def get_leaderboard_mermaid_radar() -> str:
         values = ", ".join(f"{v:.3f}" if pd.notna(v) else "0" for v in row[existing_accuracy_cols])
         lines.append(f'  curve c{i}["{row["Model name"]}"]{{{values}}}')
 
-    lines += ["", "  max 1.2", "  min 0", "```"]
-
-    return "\n".join(lines)
+    return "\n".join(lines) + MERMAID_FOOTER
 
 
 def show_leaderboard_radar():

@@ -41,7 +41,7 @@ dataset_as_df = dataset["train"].to_pandas()
 | [Qwen2.5-14B](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct)                                        | [🔗](https://arxiv.org/abs/2407.10671)                                    | medium | 14B        |                  | 0.7013     | 0.6880             | 0.6750            | 0.7910             | 0.7820            | 0.6510             | 0.6210            |
 | [GPT-4.1-mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)                             | [🔗](https://openai.com/index/gpt-4-1/)                                   | medium | ??         |                  | 0.8148     | 0.8150             | 0.7820            | **0.8800**         | 0.8510            | 0.8000             | 0.7610            |
 | [Mistral-Medium-3.5-128B](https://huggingface.co/mistralai/Mistral-Medium-3.5-128B)                    | [🔗](https://docs.mistral.ai/models/model-cards/mistral-medium-3-5-26-04) | medium | 128B       |                  | 0.8048     | 0.8280             | 0.7820            | 0.8190             | 0.7940            | 0.8180             | 0.7880            |
-| [Llama-3.1-70B-LatamGPT-SFT-1.0](https://huggingface.co/latam-gpt/Llama-3.1-70B-LatamGPT-SFT-1.0)      | [🔗](https://www.latamgpt.org)                                            | medium | 70B        | Focused on Latam | 0.7390     | 0.7720             | 0.7330            | 0.7570             | 0.7190            | 0.7410             | 0.7120            |
+| [LatamGPT-SFT-1.0](https://huggingface.co/latam-gpt/Llama-3.1-70B-LatamGPT-SFT-1.0)                    | [🔗](https://www.latamgpt.org)                                            | medium | 70B        | Focused on Latam | 0.7390     | 0.7720             | 0.7330            | 0.7570             | 0.7190            | 0.7410             | 0.7120            |
 | [Llama 3.1-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)                     | [🔗](https://ai.meta.com/blog/meta-llama-3-1/)                            | medium | 70B        |                  | 0.7707     | 0.8050             | 0.7660            | 0.7970             | 0.7690            | 0.7330             | 0.7540            |
 | [Qwen3-Coder-480B-A35B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-480B-A35B-Instruct)           | [🔗](https://arxiv.org/abs/2505.09388)                                    | large  | 430B       |                  | 0.7635     | 0.7580             | 0.7400            | 0.8370             | 0.8240            | 0.7080             | 0.7140            |
 | [Kimi-K2-Thinking](https://huggingface.co/moonshotai/Kimi-K2-Thinking)                                 | [🔗](https://moonshotai.github.io/Kimi-K2/thinking.html)                  | large  | 1T         |                  | 0.7328     | 0.7160             | 0.7090            | 0.8100             | 0.7610            | 0.6960             | 0.7050            |
@@ -52,25 +52,24 @@ dataset_as_df = dataset["train"].to_pandas()
 
 <span name="radar">
 
+
 ```mermaid
 ---
-title: LatamQA MCQ Leaderboard
+title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better visibility)
 config:
-  width: 1000
+  width: 600
   height: 600
-  theme: neo
+  theme: forest
   themeVariables:
-    mainBkg: #0d1117
-    background: #161b22
     radar:
-      curveOpacity: 0.11
-      legendFontSize: 8
+      curveOpacity: 0.29
       graticuleOpacity: 0.11
-      axisOpacity: 0.9
-      ticks: 10
+      legendBoxSize: 150
+      legendFontSize: 11
   radar:
       axisScaleFactor: 0.83
       axisLabelFactor: 0.83
+      axisLabelFontSize: 11pt
       curveTension: 0.092
 ---
 radar-beta
@@ -82,13 +81,14 @@ radar-beta
   curve c4["Mistral-Small-3.1-24B-Instruct"]{0.785, 0.761, 0.843, 0.814, 0.770, 0.743}
   curve c5["Llama 3.1-70B-Instruct"]{0.805, 0.766, 0.797, 0.769, 0.733, 0.754}
   curve c6["Qwen3-Coder-480B-A35B-Instruct"]{0.758, 0.740, 0.837, 0.824, 0.708, 0.714}
-  curve c7["Llama-3.1-70B-LatamGPT-SFT-1.0"]{0.772, 0.733, 0.757, 0.719, 0.741, 0.712}
+  curve c7["LatamGPT-SFT-1.0"]{0.772, 0.733, 0.757, 0.719, 0.741, 0.712}
   curve c8["Kimi-K2-Thinking"]{0.716, 0.709, 0.810, 0.761, 0.696, 0.705}
   curve c9["Qwen2.5-14B"]{0.688, 0.675, 0.791, 0.782, 0.651, 0.621}
   curve c10["Llama-3.1-8B-Instruct"]{0.684, 0.665, 0.680, 0.657, 0.672, 0.656}
-
-  max 1.2
-  min 0
+  max 1.0
+  min 0.6
+  ticks 4
+  showLegend true
 ```
 
 </span>
