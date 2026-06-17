@@ -1,6 +1,15 @@
 <div align="center">
+
 # `LatamQA`
 Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America
+
+
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?logo=python&logoColor=white&style=for-the-badge)](https://www.python.org/)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge&logo=uv)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=for-the-badge&logo=ruff)](https://github.com/astral-sh/ruff)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Datasets-yellow?style=for-the-badge)](https://huggingface.co/collections/inria-chile/latamqa)
+[![License: MIT](https://img.shields.io/github/license/Inria-Chile/LatamQA?color=blue&style=for-the-badge)](LICENSE)
+[![Paper DOI](https://img.shields.io/badge/DOI-10.18653%2Fv1%2F2026.mme--main.11-blue?style=for-the-badge)](https://doi.org/10.18653/v1/2026.mme-main.11)
 </div>
 
 ## Overview
@@ -36,7 +45,7 @@ title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better
 config:
   width: 600
   height: 600
-  theme: forest
+  theme: neo
   themeVariables:
     radar:
       curveOpacity: 0.29
@@ -62,6 +71,7 @@ radar-beta
   curve c8["Kimi-K2-Thinking"]{0.716, 0.709, 0.810, 0.761, 0.696, 0.705}
   curve c9["Qwen2.5-14B"]{0.688, 0.675, 0.791, 0.782, 0.651, 0.621}
   curve c10["Llama-3.1-8B-Instruct"]{0.684, 0.665, 0.680, 0.657, 0.672, 0.656}
+
   max 1.0
   min 0.6
   ticks 4

@@ -31,7 +31,7 @@ title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better
 config:
   width: 600
   height: 600
-  theme: forest
+  theme: neo
   themeVariables:
     radar:
       curveOpacity: 0.29
@@ -47,6 +47,7 @@ config:
 radar-beta"""
 
 MERMAID_FOOTER = """
+
   max 1.0
   min 0.6
   ticks 4
