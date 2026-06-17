@@ -324,7 +324,7 @@ def get_leaderboard_markdown() -> str:
 
             display_df[col] = numeric_col.apply(highlight_max)
 
-    display_columns = ["Model name", "Size", "Comments", "Average", *accuracy_columns]
+    display_columns = ["Model name", "Size", "Average", *accuracy_columns]
     display_df = display_df[[col for col in display_columns if col in display_df.columns]]
 
     return display_df.to_markdown(index=False)
