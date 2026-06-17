@@ -310,11 +310,11 @@ def get_leaderboard_markdown() -> str:
     if existing_accuracy_cols:
         display_df["Average"] = display_df[existing_accuracy_cols].mean(axis=1)
 
-    cols_to_format = [col for col in ["Average"] + accuracy_columns if col in display_df.columns]
+    cols_to_format = [col for col in ["Average", *accuracy_columns] if col in display_df.columns]
 
     for col in cols_to_format:
         numeric_col = pd.to_numeric(display_df[col], errors="coerce")
-        if not numeric_col.isnull().all():
+        if not numeric_col.isna().all():
             max_val = numeric_col.max()
 
             def highlight_max(val):
@@ -392,7 +392,8 @@ def plot_leaderboard(results_dir: str | Path = Path().cwd() / "results"):
         import seaborn as sns
     except ImportError:
         logger.error(
-            "matplotlib, seaborn, and numpy are required for plotting. Please install them: pip install matplotlib seaborn numpy"
+            "matplotlib, seaborn, and numpy are required for plotting. "
+            "Please install them: pip install matplotlib seaborn numpy"
         )
         return
 
@@ -447,7 +448,7 @@ def plot_leaderboard(results_dir: str | Path = Path().cwd() / "results"):
 
     for i, row in latest_results.iterrows():
         model_name = row["Model name"]
-        stats = row[existing_accuracy_cols].values.flatten().tolist()
+        stats = row[existing_accuracy_cols].to_numpy().flatten().tolist()
         stats += stats[:1]  # Close the plot
 
         ax_radar.plot(
@@ -476,7 +477,7 @@ def plot_leaderboard(results_dir: str | Path = Path().cwd() / "results"):
     long_df = latest_results.melt(
         id_vars=["Model name"], value_vars=existing_accuracy_cols, var_name="Metric", value_name="Accuracy"
     )
-    long_df.dropna(subset=["Accuracy"], inplace=True)
+    long_df = long_df.dropna(subset=["Accuracy"])
 
     lineplot_linestyles = [style_map[model] for model in style_map]
 

@@ -1,13 +1,10 @@
 import argparse
-import os
-import re
-from datetime import datetime, timezone
+from datetime import datetime
 from itertools import product
 from pathlib import Path
 
 import pandas as pd
 import yaml
-from datasets import Dataset, load_dataset
 from ollama import list as ollama_list
 from rich.console import Console
 from rich.markdown import Markdown
@@ -40,12 +37,15 @@ def check_ollama_model(model_name, model: dict) -> bool:
             matching_models = [m for m in ollama_list().models if m.model == ollama_model_name]
         except ConnectionError as e:
             logger.fatal(
-                f"Model definition «{model_name}» uses a LiteLLM Ollama-based model '{model['LiteLLM model name']}' but Ollama is not available: {e}."
+                f"Model definition «{model_name}» uses a LiteLLM Ollama-based model "
+                f"'{model['LiteLLM model name']}' but Ollama is not available: {e}."
             )
             exit(-1)
         if not matching_models:
             logger.fatal(
-                f"Model definition «{model_name}» uses a LiteLLM Ollama-based model '{model['LiteLLM model name']}' not found locally by ollama. Ensure it is available by running `ollama pull {ollama_model_name}`."
+                f"Model definition «{model_name}» uses a LiteLLM Ollama-based model "
+                f"'{model['LiteLLM model name']}' not found locally by ollama. "
+                f"Ensure it is available by running `ollama pull {ollama_model_name}`."
             )
             exit(-1)
     return True

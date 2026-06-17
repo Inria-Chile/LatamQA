@@ -120,19 +120,19 @@ def evaluate_mcq(
     try:
         resp = completion(**kwargs)
         return resp.choices[0].message.content.strip()  # type: ignore
-    except AuthenticationError as e:
+    except AuthenticationError:
         logger.fatal("Invalid API key: {e}")
         exit(-1)
 
-    except RateLimitError as e:
+    except RateLimitError:
         logger.fatal("Rate limit exceeded: {e}")
         exit(-1)
 
-    except Timeout as e:
+    except Timeout:
         logger.fatal("Request timed out: {e}")
         exit(-1)
 
-    except BadRequestError as e:
+    except BadRequestError:
         logger.fatal("Bad request: {e}")
         exit(-1)
 
