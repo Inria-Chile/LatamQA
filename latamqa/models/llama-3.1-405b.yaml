@@ -1,0 +1,5 @@
+LiteLLM model name: meta/llama3.1-405b-instruct
+Model name: meta-llama/Llama-3.1-405B-Instruct
+Model URL: https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct
+Model size: 405B
+Model type: large

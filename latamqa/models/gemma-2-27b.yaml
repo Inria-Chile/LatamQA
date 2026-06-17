@@ -1,0 +1,5 @@
+LiteLLM model name: ollama/gemma2:27b
+Model name: google/gemma-2-27b-it
+Model URL: https://huggingface.co/google/gemma-2-27b-it
+Model size: 27B
+Model type: large

@@ -19,10 +19,13 @@ authors:
     given-names: Djame\'e
   - family-names: Barri\`ere
     given-names: Valentin
-title: 'Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America'
+title: "Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America"
 version: 1.0.0
 url: https://inria.hal.science/hal-05510068
-date-released: '2026-02-16'
+date-released: "2026-02-16"
+identifiers:
+  - type: doi
+    value: 10.18653/v1/2026.mme-main.11
 preferred-citation:
   authors:
     - family-names: Karmim
@@ -43,11 +46,14 @@ preferred-citation:
       given-names: Djame\'e
     - family-names: Barri\`ere
       given-names: Valentin
-  title: 'Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America'
+  title: "Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America"
   url: https://inria.hal.science/hal-05510068
   type: conference-paper
   year: 2026
   collection-title: Proceedings of the Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026)
-  conference: {Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026)}
+  conference:
+    {
+      Workshop on Multilingual Multicultural Evaluation of the 19th Conference of the European Chapter of the Association for Computational Linguistics (EACL'2026),
+    }
   publisher:
     address: Rabbat, Morocco
