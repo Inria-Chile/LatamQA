@@ -3,13 +3,12 @@
 # `LatamQA`
 Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America
 
-
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?logo=python&logoColor=white&style=for-the-badge)](https://www.python.org/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge&logo=uv)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=for-the-badge&logo=ruff)](https://github.com/astral-sh/ruff)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Datasets-FFD21E?style=for-the-badge&logo=huggingface)](https://huggingface.co/collections/inria-chile/latamqa)
 [![License: MIT](https://img.shields.io/github/license/Inria-Chile/LatamQA?style=for-the-badge)](LICENSE)
-[![Paper DOI](https://img.shields.io/badge/DOI-10.18653%2Fv1%2F2026.mme--main.11-blue?style=for-the-badge)](https://doi.org/10.18653/v1/2026.mme-main.11)
+[![Paper DOI](https://img.shields.io/badge/DOI-10.18653%2Fv1%2F2026.mme--main.11-FAB70C?style=for-the-badge&logo=doi)](https://doi.org/10.18653/v1/2026.mme-main.11)
 </div>
 
 ## Overview
