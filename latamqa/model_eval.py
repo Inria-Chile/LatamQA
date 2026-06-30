@@ -63,6 +63,10 @@ def compute_results(
 ) -> dict[str, float | str | int]:
     model = load_models(MODELS_DIR)[model_name]
 
+    # A model YAML may pin its own endpoint via the optional "LLM URI" field
+    # (e.g. an OpenAI-compatible base URL). An explicit llm_uri argument wins.
+    llm_uri = llm_uri or model.get("LLM URI")
+
     instances = product(REGIONAL_DATASETS, TARGET_LANGUAGES)
 
     results = {}
@@ -138,6 +142,12 @@ def main():
         default=None,
         help="API key for LLM (if needed)",
     )
+    update_parser.add_argument(
+        "--llm_uri",
+        type=str,
+        default=None,
+        help="URL for local/custom LLM provider (overrides the model's 'LLM URI' field, if any)",
+    )
 
     args = parser.parse_args()
 
@@ -152,6 +162,7 @@ def main():
             prompt_template=args.prompt_template,
             results_dir=args.results_dir,
             llm_api_key=args.llm_api_key,
+            llm_uri=args.llm_uri,
         )
 
 
