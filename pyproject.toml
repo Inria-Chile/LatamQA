@@ -21,11 +21,17 @@ dependencies = [
     "seaborn>=0.13.2",
 ]
 
+[project.optional-dependencies]
+# vLLM is a heavy, Linux/GPU-only package (no macOS wheels). It is opt-in so the
+# default install stays lightweight; pull it in on a GPU host with
+#   uv sync --extra vllm        (or, from the repo root: uv pip install ".[vllm]")
+# and self-host registered models via `uv run serve_vllm`.
+vllm = ["vllm; sys_platform == 'linux'"]
+
 [dependency-groups]
 dev = ["notebook", "ipywidgets", "pytest", "pytest-cov", "ipykernel"]
 
 [tool.uv]
-
 
 [tool.hatch.build.targets.sdist]
 include = ["latamqa"]
@@ -69,3 +75,4 @@ norecursedirs = ".venv"
 eval_mcq = "latamqa.eval_mcq:main"
 leaderboard = "latamqa.leaderboard:main"
 model_eval = "latamqa.model_eval:main"
+serve_vllm = "latamqa.serve_vllm:main"
