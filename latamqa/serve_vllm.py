@@ -11,9 +11,22 @@ evaluated through the same OpenAI-compatible path the rest of the project uses:
     uv run eval_mcq --model openai/llama-3.1-8b \\
         --llm_uri http://localhost:8000/v1 --llm_api_key dummy
 
-vLLM is **not** a project dependency (it is a heavy, GPU-only package). Install
-it in the serving environment beforehand, e.g. ``uv pip install vllm`` or
-``pip install vllm`` on the GPU host.
+Pass ``--prefetch`` to download the model weights locally (via the Hugging Face
+Hub) before serving. Combine it with ``--dry_run`` to *only* fetch the weights
+and print the serve command — handy on HPC setups where the login node has
+internet access but the GPU/compute node does not:
+
+    # on the login node (has internet):
+    uv run serve_vllm --model latam-gpt-1.0-70b --prefetch --download_dir "$WORK/models" --dry_run
+    # later, on the offline GPU node, serve straight from the local copy:
+    uv run serve_vllm --model latam-gpt-1.0-70b --model_path "$WORK/models/latam-gpt--Llama-3.1-70B-LatamGPT-SFT-1.0"
+
+vLLM is an **optional** dependency (a heavy, Linux/GPU-only package), declared
+under the ``vllm`` extra so the default install stays lightweight. Install it on
+the GPU host before serving::
+
+    uv sync --extra vllm        # from the repo root
+    uv pip install ".[vllm]"    # or, into the active environment
 """
 
 import argparse
@@ -68,6 +81,37 @@ def resolve_source(model_id: str | None, model_path: str | None) -> tuple[str, s
         served_name = Path(source).name
 
     return source, served_name
+
+
+def prefetch_model(source: str, download_dir: str | None) -> str:
+    """Download ``source`` from the Hugging Face Hub and return a local path to serve from.
+
+    If ``source`` is already a local directory it is returned unchanged. When
+    ``download_dir`` is given the snapshot is materialised under
+    ``download_dir/<repo-id-with-slashes-as-dashes>``; otherwise it lands in the
+    standard Hugging Face cache (``HF_HOME``). Gated repositories are
+    authenticated through the usual ``HF_TOKEN`` environment variable.
+    """
+    if Path(source).expanduser().is_dir():
+        logger.info("Source is already a local directory; skipping prefetch.", source=source)
+        return source
+
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        logger.fatal(
+            "`--prefetch` requires the `huggingface_hub` package, which was not found. "
+            "Install it first, e.g. `uv pip install huggingface_hub`."
+        )
+        sys.exit(127)
+
+    local_dir = str(Path(download_dir).expanduser() / source.replace("/", "--")) if download_dir else None
+    logger.info("Prefetching model weights from the Hugging Face Hub.", repo_id=source, local_dir=local_dir or "<HF cache>")
+
+    local_path = snapshot_download(repo_id=source, local_dir=local_dir)
+
+    logger.info("Prefetch complete.", local_path=local_path)
+    return local_path
 
 
 def build_command(args: argparse.Namespace, source: str, served_name: str, passthrough: list[str]) -> list[str]:
@@ -149,6 +193,16 @@ def main():
         help="Disable CUDA graph capture (lower memory, slower; useful for debugging).",
     )
     parser.add_argument(
+        "--prefetch",
+        action="store_true",
+        help="Download the model weights locally (Hugging Face Hub) before serving, then serve from the local copy.",
+    )
+    parser.add_argument(
+        "--download_dir",
+        default=None,
+        help="Directory to store prefetched weights in (defaults to the Hugging Face cache). Only used with --prefetch.",
+    )
+    parser.add_argument(
         "--dry_run",
         action="store_true",
         help="Print the resolved `vllm serve` command and exit without launching.",
@@ -164,6 +218,9 @@ def main():
 
     if args.served_name:
         served_name = args.served_name
+
+    if args.prefetch:
+        source = prefetch_model(source, args.download_dir)
 
     cmd = build_command(args, source, served_name, passthrough)
 
@@ -184,8 +241,8 @@ def main():
 
     if shutil.which("vllm") is None:
         logger.fatal(
-            "The `vllm` executable was not found on PATH. Install it in the serving "
-            "environment first, e.g. `uv pip install vllm` (GPU host required)."
+            "The `vllm` executable was not found on PATH. Install the optional `vllm` "
+            'extra first on the GPU host, e.g. `uv sync --extra vllm` or `uv pip install ".[vllm]"`.'
         )
         sys.exit(127)
 
@@ -196,6 +253,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# 103793196502094375796_9145abc4d42c23de

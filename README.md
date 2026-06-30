@@ -3,16 +3,16 @@
 # `LatamQA`
 Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creation: Application to Latin America
 
-
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg?logo=python&logoColor=white&style=for-the-badge)](https://www.python.org/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge&logo=uv)](https://github.com/astral-sh/uv)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=for-the-badge&logo=ruff)](https://github.com/astral-sh/ruff)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face-Datasets-FFD21E?style=for-the-badge&logo=huggingface)](https://huggingface.co/collections/inria-chile/latamqa)
-[![License: MIT](https://img.shields.io/github/license/Inria-Chile/LatamQA?style=for-the-badge)](LICENSE)
 [![Paper DOI](https://img.shields.io/badge/DOI-10.18653%2Fv1%2F2026.mme--main.11-blue?style=for-the-badge)](https://doi.org/10.18653/v1/2026.mme-main.11)
+[![License: MIT](https://img.shields.io/github/license/Inria-Chile/LatamQA?style=for-the-badge)](LICENSE)
 </div>
 
 ## Overview
+
 <table><tr><td width="74%">
 <a href="https://doi.org/10.18653/v1/2026.mme-main.11">LatamQA</a> is a cultural knowledge benchmark designed to evaluate Large Language Models on Latin American contexts. The dataset addresses the critical gap in bias detection resources for non-English languages and underrepresented cultures. Built from 26,000+ Wikipedia articles and structured using Wikidata's knowledge graph with expert guidance from social scientists, LatamQA contains over 26,000 multiple-choice questions covering the diverse popular and social cultures of Latin American countries. Questions are available in Spanish and Portuguese (the region's primary languages) as well as English translations, enabling evaluation of both multilingual capabilities and cultural representation. This resource helps researchers assess whether LLMs—predominantly trained on Global North data—exhibit prejudicial behavior or knowledge gaps when handling Latin American cultural contexts.</td><td width="26%"><img src="latam_questions_map.png" alt="MCQs per Latam country" width="100%"/></td></tr></table>
 
@@ -36,12 +36,18 @@ Leveraging Wikidata for Geographically Informed Sociocultural Bias Dataset Creat
 
 </span>
 
+**Notation:**
+
+- Model sizes: small: `num_params` < 14B, medium: 14B <= `num_params` <= 120B, and large: `num_params` >= 100B.
+- Average accuracy is the mean of the six region/language slices. 
+- The best accuracy per slice is highlighted in bold.
+
 <span name="radar">
 
 
 ```mermaid
 ---
-title: LatamQA MCQ Leaderboard - Accuracy Radar (values in [0.6, 1.0] for better visibility)
+title: LatamQA MCQ Leaderboard - Accuracy by dataset (values in [0.6, 1.0] for readability)
 config:
   width: 740
   height: 740
@@ -155,6 +161,7 @@ dataset_as_df = dataset["train"].to_pandas()
 
 * In the `LatamQA` directory, install project dependencies by running `uv sync`.
 * This will create a Python virtual environment in the folder `.venv/`.
+* To also self-host models with vLLM, add the optional `vllm` extra (`uv sync --extra vllm`, Linux/GPU only — see [`serve_vllm`](#serve_vllm-for-llm-self-hosting)).
 * At this point, you can activate the Python virtual environment, modify and run the script directly, for example by doing:
 
 ```bash
@@ -164,7 +171,7 @@ python latamqa/eval_mcq.py --model <your-model>
 
 ## `eval_mcq` evaluation script
 
-`eval_mcq` is a universal version of the evaluation script. It supports 100+ local and remote LLM providers (OpenAI, Anthropic, Mistral, Ollama, vLLM, etc.) via LiteLLM. It evaluates a model on a **single** region/language slice. To evaluate every slice in one run, use [`model_eval`](#model_eval-batch-evaluation) instead.
+`eval_mcq` is a universal version of the evaluation script. It supports 100+ local and remote LLM providers (OpenAI, Anthropic, Mistral, Ollama, vLLM, etc.) via [LiteLLM](https://docs.litellm.ai/docs/). It evaluates a model on a **single** region/language slice. To evaluate every slice in one run, use [`model_eval`](#model_eval-batch-evaluation) instead.
 
 ### Usage
 
@@ -216,46 +223,13 @@ uv run eval_mcq --model openai/your-model --llm_uri http://localhost:8000/v1 --l
 
 **Note on Ollama models:** LiteLLM does not directly download or `pull` models into Ollama; instead, LiteLLM acts as a proxy to interact with models that are already managed by Ollama. To make Ollama download a model, you must use the Ollama CLI or API directly, which LiteLLM can then utilize. For example: `ollama pull hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF` downloads the model from the examples above.
 
-## `serve_vllm` self-hosting
-
-Self-host any registered model (a YAML in `latamqa/models/`) with vLLM's OpenAI-compatible
-server, so it can be evaluated through the same `openai/...` path shown above. vLLM is **not**
-a project dependency (it is a heavy, GPU-only package); install it in the serving environment
-first, e.g. `uv pip install vllm` on the GPU host.
-
-```bash
-# Serve a registered model (resolves its Hugging Face repo automatically)
-uv run serve_vllm --model llama-3.1-8b
-
-# Larger model sharded across 2 GPUs, with extra vLLM flags forwarded verbatim
-uv run serve_vllm --model latam-gpt-1.0-70b --tensor_parallel_size 2 --max_model_len 4096 --quantization fp8
-
-# Serve a local checkpoint that is not in the registry
-uv run serve_vllm --model_path /data/models/my-checkpoint --port 8100
-
-# Preview the resolved `vllm serve` command without launching it
-uv run serve_vllm --model llama-3.1-8b --dry_run
-```
-
-The server is exposed under `--served_name` (defaults to the model id). Evaluate against it in
-another shell:
-
-```bash
-uv run eval_mcq --model openai/llama-3.1-8b --llm_uri http://localhost:8000/v1 --llm_api_key dummy
-```
-
-Common options: `--port`, `--host`, `--tensor_parallel_size`, `--dtype`, `--max_model_len`,
-`--gpu_memory_utilization`, `--enforce_eager`. Any unrecognised flags are forwarded straight to
-`vllm serve`. To point at a local checkpoint instead of the Hugging Face repo, either pass
-`--model_path` or add a `vLLM model:` field to the model's YAML.
-
 ### Custom prompt template
 
-If you want to use a custom evaluation prompt you can pass the file name as argument to `eval_mcq.py`. File `prompt_eval.txt` contains an example of prompt.
+If you want to use a custom evaluation prompt you can pass the file name as argument to `eval_mcq.py`. File [`prompt_eval.txt`](./prompt_eval.txt) contains an example of prompt.
 
 ### Output
 
-Results are saved in the `results/` directory:
+Results are saved in the `results` directory (via `--results_dir`) with the following naming convention:
 
 * `mcq_eval_results_<region>_<lang>_<model>.csv` -- per-question details
 * `mcq_eval_summary_<region>_<lang>_<model>.txt` -- accuracy summary
@@ -392,3 +366,74 @@ uv run leaderboard update-readme
     | :-------------- | :--------- | :-------------------------------------------------- |
     | `--results_dir` | `results/` | Folder where the plot image will be saved.          |
 
+
+## `serve_vllm` for LLM self-hosting
+
+Self-host any registered model (a YAML in `latamqa/models/`) with vLLM's OpenAI-compatible
+server, so it can be evaluated through the same `openai/...` path shown above. vLLM is a heavy,
+Linux/GPU-only package, so it ships as the **optional `vllm` extra** rather than a default
+dependency. Install it on the GPU host before serving:
+
+```bash
+uv sync --extra vllm        # from the repo root (recommended)
+uv pip install ".[vllm]"    # or, from the repo root, into the active environment
+```
+
+The extra is gated to Linux (`sys_platform == 'linux'`); on other platforms (e.g. macOS) it
+installs nothing, since vLLM serving requires a Linux NVIDIA GPU host.
+
+```bash
+# Serve a registered model (resolves its Hugging Face repo automatically)
+uv run serve_vllm --model llama-3.1-8b
+
+# Larger model sharded across 2 GPUs, with extra vLLM flags forwarded verbatim
+uv run serve_vllm --model latam-gpt-1.0-70b --tensor_parallel_size 2 --max_model_len 4096 --quantization fp8
+
+# Serve a local checkpoint that is not in the registry
+uv run serve_vllm --model_path /data/models/my-checkpoint --port 8100
+
+# Preview the resolved `vllm serve` command without launching it
+uv run serve_vllm --model llama-3.1-8b --dry_run
+```
+
+The server is exposed under `--served_name` (defaults to the model id). Evaluate against it in
+another shell:
+
+```bash
+uv run eval_mcq --model openai/llama-3.1-8b --llm_uri http://localhost:8000/v1 --llm_api_key dummy
+```
+
+Common options: `--port`, `--host`, `--tensor_parallel_size`, `--dtype`, `--max_model_len`,
+`--gpu_memory_utilization`, `--enforce_eager`. Any unrecognised flags are forwarded straight to
+`vllm serve`. To point at a local checkpoint instead of the Hugging Face repo, either pass
+`--model_path` or add a `vLLM model:` field to the model's YAML.
+
+### Prefetching weights locally
+
+Pass `--prefetch` to download the model's weights from the Hugging Face Hub *before* serving,
+so the server starts from a local copy. Combine it with `--dry_run` to fetch the weights only
+(and print the serve command) without launching — the typical HPC pattern, where the login node
+has internet access but the GPU/compute node does not. Because `--dry_run` stops before vLLM is
+launched, this fetch-only step needs no GPU stack on the login node, just network access.
+
+```bash
+# Fetch + serve in one step (weights land in the Hugging Face cache by default)
+uv run serve_vllm --model latam-gpt-1.0-70b --prefetch
+
+# Store the weights under an explicit directory instead of the HF cache
+uv run serve_vllm --model latam-gpt-1.0-70b --prefetch --download_dir "$WORK/models"
+
+# HPC step 1 — prefetch on the internet-connected login node, then exit
+uv run serve_vllm --model latam-gpt-1.0-70b --prefetch --download_dir "$WORK/models" --dry_run
+
+# HPC step 2 — later, on the offline GPU node, serve straight from the local copy
+uv run serve_vllm --model latam-gpt-1.0-70b \
+    --model_path "$WORK/models/latam-gpt--Llama-3.1-70B-LatamGPT-SFT-1.0"
+```
+
+With `--download_dir`, weights are stored under `<download_dir>/<repo-id>` (slashes in the repo
+id become `--`); without it they go to the standard Hugging Face cache. Either way the resolved
+local path is printed on the `Prefetch complete.` log line — copy it into `--model_path` for the
+serve step. If the source is already a local directory the prefetch is skipped. For gated
+repositories, export a Hugging Face token first (`export HF_TOKEN=hf_…`, from
+<https://huggingface.co/settings/tokens>).
