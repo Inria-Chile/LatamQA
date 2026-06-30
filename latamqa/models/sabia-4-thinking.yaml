@@ -1,0 +1,10 @@
+# Maritaca AI has no native LiteLLM provider; use the OpenAI-compatible route.
+# The endpoint is pinned via "LLM URI" below, so only the API key is needed, e.g.:
+#   uv run model_eval evaluate --model sabia-4-thinking --llm_api_key "$MARITACA_API_KEY"
+LiteLLM model name: openai/sabia-4-thinking
+LLM URI: https://chat.maritaca.ai/api
+Model name: Sabiá-4 Thinking
+Model URL: https://www.maritaca.ai/en/blog/sabia-4
+Model size: undisclosed
+Model type: large
+Paper URL: https://arxiv.org/abs/2603.10213
