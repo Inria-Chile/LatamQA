@@ -216,6 +216,39 @@ uv run eval_mcq --model openai/your-model --llm_uri http://localhost:8000/v1 --l
 
 **Note on Ollama models:** LiteLLM does not directly download or `pull` models into Ollama; instead, LiteLLM acts as a proxy to interact with models that are already managed by Ollama. To make Ollama download a model, you must use the Ollama CLI or API directly, which LiteLLM can then utilize. For example: `ollama pull hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF` downloads the model from the examples above.
 
+## `serve_vllm` self-hosting
+
+Self-host any registered model (a YAML in `latamqa/models/`) with vLLM's OpenAI-compatible
+server, so it can be evaluated through the same `openai/...` path shown above. vLLM is **not**
+a project dependency (it is a heavy, GPU-only package); install it in the serving environment
+first, e.g. `uv pip install vllm` on the GPU host.
+
+```bash
+# Serve a registered model (resolves its Hugging Face repo automatically)
+uv run serve_vllm --model llama-3.1-8b
+
+# Larger model sharded across 2 GPUs, with extra vLLM flags forwarded verbatim
+uv run serve_vllm --model latam-gpt-1.0-70b --tensor_parallel_size 2 --max_model_len 4096 --quantization fp8
+
+# Serve a local checkpoint that is not in the registry
+uv run serve_vllm --model_path /data/models/my-checkpoint --port 8100
+
+# Preview the resolved `vllm serve` command without launching it
+uv run serve_vllm --model llama-3.1-8b --dry_run
+```
+
+The server is exposed under `--served_name` (defaults to the model id). Evaluate against it in
+another shell:
+
+```bash
+uv run eval_mcq --model openai/llama-3.1-8b --llm_uri http://localhost:8000/v1 --llm_api_key dummy
+```
+
+Common options: `--port`, `--host`, `--tensor_parallel_size`, `--dtype`, `--max_model_len`,
+`--gpu_memory_utilization`, `--enforce_eager`. Any unrecognised flags are forwarded straight to
+`vllm serve`. To point at a local checkpoint instead of the Hugging Face repo, either pass
+`--model_path` or add a `vLLM model:` field to the model's YAML.
+
 ### Custom prompt template
 
 If you want to use a custom evaluation prompt you can pass the file name as argument to `eval_mcq.py`. File `prompt_eval.txt` contains an example of prompt.
