@@ -8,3 +8,8 @@ Model URL: https://www.maritaca.ai/en/blog/sabia-4
 Model size: undisclosed
 Model type: large
 Paper URL: https://arxiv.org/abs/2603.10213
+# Optional per-model evaluation tuning. Uncomment to pin a value here instead of
+# passing --batch_size / --num_retries on the command line. Setting the same
+# option in both places stops the run with an "option clash" error.
+# Batch size: 8
+# Number of retries: 5

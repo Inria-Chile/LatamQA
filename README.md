@@ -176,7 +176,7 @@ python latamqa/eval_mcq.py --model <your-model>
 ### Usage
 
 ```bash
-uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regional,english}] [--max_results MAX_RESULTS] [--seed SEED] [--temperature TEMPERATURE] [--prompt_template PROMPT_TEMPLATE] [--results_dir RESULTS_DIR] [--llm_api_key LLM_API_KEY] [--llm_uri LLM_URI]
+uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regional,english}] [--max_results MAX_RESULTS] [--seed SEED] [--temperature TEMPERATURE] [--batch_size BATCH_SIZE] [--num_retries NUM_RETRIES] [--prompt_template PROMPT_TEMPLATE] [--results_dir RESULTS_DIR] [--llm_api_key LLM_API_KEY] [--llm_uri LLM_URI]
 ```
 
 | Argument     | Default   | Description  |
@@ -187,6 +187,8 @@ uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regio
 | `--max_results` | $\infty$ | Limit number of questions evaluated |
 | `--seed` | `42` | Random number generator seed for answer shuffling |
 | `--temperature` | `0.0` | Sampling temperature |
+| `--batch_size` | `16` | Number of requests sent concurrently. Higher values evaluate faster (and let a self-hosted vLLM server batch); set to `1` for the old sequential behavior, or lower it if a provider rate-limits you. |
+| `--num_retries` | `3` | Retries LiteLLM performs for transient failures (rate limits, timeouts) before the question is recorded as an error |
 | `--prompt_template` | `None` | File name of custom prompt template |
 | `--results_dir` | `results/` | Folder for storing results |
 | `--llm_api_key` | `None` | API key for LLM (if needed) |
@@ -262,11 +264,57 @@ name.
     | `--max_results`     | `None`     | Limit the number of questions evaluated per slice.           |
     | `--seed`            | `42`       | Random number generator seed for answer shuffling.           |
     | `--temperature`     | `0.0`      | Sampling temperature for the model.                          |
+    | `--batch_size`      | `16`       | Number of requests sent concurrently per slice (`1` = sequential; lower it if rate-limited). May instead be set per-model via the YAML's `Batch size` field — but not in both places (see below). |
+    | `--num_retries`     | `3`        | Retries LiteLLM performs for transient failures before a question is recorded as an error. May instead be set per-model via the YAML's `Number of retries` field — but not in both places (see below). |
     | `--prompt_template` | `None`     | File name of a custom prompt template.                       |
     | `--results_dir`     | `results/` | Folder for storing the evaluation results.                   |
     | `--llm_api_key`     | `None`     | API key for the LLM provider (if needed).                    |
+    | `--llm_uri`         | `None`     | URL for a local/custom LLM provider. May instead be set per-model via the YAML's `LLM URI` field — but not in both places (see below). |
 
     The output files follow the same naming convention as `eval_mcq` (see [Output](#output) above), so the resulting `results/` directory can be passed straight to `leaderboard update --results_dir results/`.
+
+#### Per-model evaluation tuning
+
+`batch_size`, `num_retries` and the provider `LLM URI` can also be pinned per
+model in its YAML under `latamqa/models/`, which is handy when a self-hosted
+model wants a large batch (and its own endpoint) while a rate-limited API wants
+a small one. Add the (optional) fields:
+
+```yaml
+LiteLLM model name: openai/sabia-4-thinking
+LLM URI: https://chat.maritaca.ai/api   # optional; same as --llm_uri for this model
+Batch size: 8                            # optional; same as --batch_size for this model
+Number of retries: 5                     # optional; same as --num_retries for this model
+```
+
+For each of these options, resolution is CLI **or** YAML, never both: if only
+one sets the value it is used, and if neither does the built-in default applies.
+Setting the **same** option in both the YAML and on the command line is reported
+as an *option clash* and stops the run, so the source of truth is never
+ambiguous.
+
+#### Model configuration schema
+
+Each `latamqa/models/<model-id>.yaml` file is validated against a JSON Schema
+([`latamqa/model_schema.py`](latamqa/model_schema.py)) whenever the models are
+loaded — by both `model_eval` and `leaderboard`. Any malformed config stops the
+command up front with a message pointing at the offending file and field, rather
+than failing deep inside an evaluation. Unknown keys are rejected too, so typos
+like `Model typ` are caught immediately.
+
+| Field                | Required | Type    | Notes                                                                 |
+| :------------------- | :------: | :------ | :-------------------------------------------------------------------- |
+| `LiteLLM model name` | ✅        | string  | Identifier passed to LiteLLM, e.g. `gpt-4o`, `ollama/llama3`.          |
+| `Model name`         | ✅        | string  | Human-readable display name; keys the leaderboard.                    |
+| `Model URL`          | ✅        | string  | `http(s)://` link to the model's page.                                |
+| `Model size`         | ✅        | string  | Parameter count or qualitative size, e.g. `70B`, `1T (32B active)`, `undisclosed`. |
+| `Model type`         | ✅        | enum    | One of `small`, `medium`, `large` (used to order the leaderboard).    |
+| `Paper URL`          | ➖        | string  | `http(s)://` link to the model's paper.                               |
+| `LLM URI`            | ➖        | string  | `http(s)://` base URL for a self-hosted/custom endpoint (see above).  |
+| `Comments`           | ➖        | string  | Free-text note shown in the leaderboard.                              |
+| `Batch size`         | ➖        | integer | Per-model concurrency, `≥ 1` (see above).                             |
+| `Number of retries`  | ➖        | integer | Per-model retry count, `≥ 0` (see above).                             |
+| `show_in_leaderboard`| ➖        | boolean | Set `false` to hide the model from the public leaderboard.           |
 
 ## Leaderboard Management
 

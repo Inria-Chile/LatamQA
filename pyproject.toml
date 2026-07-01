@@ -15,10 +15,12 @@ dependencies = [
     "tabulate",
     "gradio-leaderboard",
     "litellm",
+    "jsonschema",
     "ollama>=0.6.1",
     "gradio>=5.50.0",
     "matplotlib>=3.10.8",
     "seaborn>=0.13.2",
+    "tenacity>=9.1.4",
 ]
 
 [project.optional-dependencies]

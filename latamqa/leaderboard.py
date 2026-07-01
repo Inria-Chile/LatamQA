@@ -11,6 +11,7 @@ from structlog import get_logger
 
 from latamqa.eval_mcq import REGIONAL_DATASETS, TARGET_LANGUAGES
 from latamqa.model_eval import MODELS_DIR, list_models, load_models
+from latamqa.model_schema import MODEL_TYPES
 
 logger = get_logger(__name__)
 
@@ -274,9 +275,8 @@ def get_leaderboard_markdown() -> str:
     latest_results = get_current_leaderboard()
 
     if "Model type" in latest_results.columns:
-        model_type_order = ["small", "medium", "large"]
         latest_results["Model type"] = pd.Categorical(
-            latest_results["Model type"].str.lower(), categories=model_type_order, ordered=True
+            latest_results["Model type"].str.lower(), categories=MODEL_TYPES, ordered=True
         )
         latest_results = latest_results.sort_values("Model type")
 

@@ -7,6 +7,7 @@ import argparse
 import os
 import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Tuple
 
@@ -14,7 +15,7 @@ import pandas as pd
 import structlog
 from datasets import load_dataset
 from litellm import completion
-from litellm.exceptions import APIConnectionError, APIError, AuthenticationError, BadRequestError, RateLimitError, Timeout
+from litellm.exceptions import AuthenticationError, BadRequestError
 from rich.console import Console
 from rich.markdown import Markdown
 from tqdm.auto import tqdm
@@ -37,6 +38,14 @@ Answer:
 
 REGIONAL_DATASETS = ["es-la", "es-es", "pt-br"]
 TARGET_LANGUAGES = ["regional", "english"]
+
+# Number of MCQ requests kept in flight at once. Concurrency turns the
+# otherwise-sequential eval loop into a batch of parallel calls, which is a
+# large speedup against API providers and lets a self-hosted vLLM server use
+# its continuous batching.
+DEFAULT_BATCH_SIZE = 16
+# LiteLLM-side retries for transient failures (rate limits, timeouts, blips).
+DEFAULT_NUM_RETRIES = 3
 
 
 def sanitize(s: str) -> str:
@@ -89,6 +98,16 @@ def extract_answer(response: str) -> str | None:
     return None
 
 
+def build_prompt(prompt_template: str, question: str, options: List[str]) -> str:
+    """Fill the prompt template with the question and its (shuffled) options."""
+    prompt = prompt_template.replace("{question}", question)
+    prompt = prompt.replace("{option_a}", options[0])
+    prompt = prompt.replace("{option_b}", options[1])
+    prompt = prompt.replace("{option_c}", options[2])
+    prompt = prompt.replace("{option_d}", options[3])
+    return prompt
+
+
 def evaluate_mcq(
     model: str,
     prompt_template: str,
@@ -97,19 +116,24 @@ def evaluate_mcq(
     temperature: float,
     llm_api_key: str | None = None,
     llm_uri: str | None = None,
+    num_retries: int = DEFAULT_NUM_RETRIES,
 ) -> str:
-    """Ask the LLM to answer the MCQ via LiteLLM and return its response."""
-    prompt = prompt_template.replace("{question}", question)
-    prompt = prompt.replace("{option_a}", options[0])
-    prompt = prompt.replace("{option_b}", options[1])
-    prompt = prompt.replace("{option_c}", options[2])
-    prompt = prompt.replace("{option_d}", options[3])
+    """Ask the LLM to answer a single MCQ via LiteLLM and return its raw response.
+
+    Transient failures (rate limits, timeouts, connection blips) are retried
+    internally by LiteLLM up to ``num_retries`` times. Any error that survives
+    the retries propagates to the caller, which decides whether it is fatal for
+    the whole run or should be recorded as a single failed question. This keeps
+    the function thread-safe so it can be fanned out across a thread pool.
+    """
+    prompt = build_prompt(prompt_template, question, options)
 
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
         "max_tokens": 10,  # We only need one letter
+        "num_retries": num_retries,
     }
 
     if llm_api_key:
@@ -117,36 +141,8 @@ def evaluate_mcq(
     if llm_uri:
         kwargs["api_base"] = llm_uri
 
-    try:
-        resp = completion(**kwargs)
-        return resp.choices[0].message.content.strip()  # type: ignore
-    except AuthenticationError:
-        logger.fatal("Invalid API key: {e}")
-        exit(-1)
-
-    except RateLimitError:
-        logger.fatal("Rate limit exceeded: {e}")
-        exit(-1)
-
-    except Timeout:
-        logger.fatal("Request timed out: {e}")
-        exit(-1)
-
-    except BadRequestError:
-        logger.fatal("Bad request: {e}")
-        exit(-1)
-
-    except APIConnectionError as e:
-        logger.fatal(f"Connection error: {e}")
-        exit(-1)
-
-    except APIError as e:
-        logger.fatal(f"Provider API error: {e}")
-        exit(-1)
-
-    except Exception as e:
-        logger.error(f"Unexpected error: {type(e).__name__}: {e}")
-        exit(-1)
+    resp = completion(**kwargs)
+    return resp.choices[0].message.content.strip()  # type: ignore
 
 
 def run_evaluation(
@@ -160,6 +156,8 @@ def run_evaluation(
     results_dir: str | Path | None = None,
     llm_api_key: str | None = None,
     llm_uri: str | None = None,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    num_retries: int = DEFAULT_NUM_RETRIES,
 ):
     """Run the MCQ evaluation."""
 
@@ -197,61 +195,88 @@ def run_evaluation(
     else:
         prompt_template = DEFAULT_PROPMT_TEMPLATE
 
-    for item in tqdm(data, desc=f"Evaluating «{dataset_name}»", leave=False):
-        question = item[q]
+    # Phase 1 — prepare every question deterministically (sequential).
+    # `shuffle_options` seeds the global RNG, so this step must not run
+    # concurrently or the shuffles would race and become non-reproducible.
+    tasks = []
+    for item in data:
         row_seed = seed + hash(str(item["article_id"])) % 10000
         options, correct_letter = shuffle_options(item[a], item[d1], item[d2], item[d3], row_seed)
-        try:
-            response = evaluate_mcq(
+        tasks.append({"item": item, "question": item[q], "options": options, "correct_letter": correct_letter})
+
+    # Phase 2 — issue the LLM calls concurrently, at most `batch_size` in flight.
+    # Each result is written back to its own slot so dataset order is preserved.
+    responses: list = [None] * len(tasks)
+    with ThreadPoolExecutor(max_workers=max(1, batch_size)) as executor:
+        future_to_idx = {
+            executor.submit(
+                evaluate_mcq,
                 model,
                 prompt_template,
-                question,
-                options,
+                task["question"],
+                task["options"],
                 temperature,
                 llm_api_key=llm_api_key,
                 llm_uri=llm_uri,
-            )
+                num_retries=num_retries,
+            ): idx
+            for idx, task in enumerate(tasks)
+        }
+        for future in tqdm(
+            as_completed(future_to_idx),
+            total=len(tasks),
+            desc=f"Evaluating «{dataset_name}»",
+            leave=False,
+        ):
+            idx = future_to_idx[future]
+            try:
+                responses[idx] = future.result()
+            except (AuthenticationError, BadRequestError) as e:
+                # Misconfiguration: every request will fail the same way, so
+                # there is no point finishing the batch — abort the whole run.
+                executor.shutdown(wait=False, cancel_futures=True)
+                logger.fatal(f"{type(e).__name__}: {e}")
+                exit(-1)
+            except Exception as e:
+                # Transient/other failure for this one question (survived the
+                # retries): record it and let the rest of the batch finish.
+                logger.error(f"article_id={tasks[idx]['item'].get('article_id')}: {e}.")
+                responses[idx] = e
+
+    # Phase 3 — assemble results in the original dataset order (sequential).
+    for task, response in zip(tasks, responses):
+        item = task["item"]
+        options = task["options"]
+        correct_letter = task["correct_letter"]
+
+        if isinstance(response, Exception) or response is None:
+            model_response = None
+            predicted = None
+            is_correct = False
+            total_err += 1
+        else:
+            model_response = response
             predicted = extract_answer(response)
             is_correct = predicted == correct_letter
-
             if is_correct:
                 correct += 1
             total += 1
 
-            results.append(
-                {
-                    "article_id": item["article_id"],
-                    "question": item["question"],
-                    "correct_answer": item["answer"],
-                    "option_A": options[0],
-                    "option_B": options[1],
-                    "option_C": options[2],
-                    "option_D": options[3],
-                    "correct_letter": correct_letter,
-                    "model_response": response,
-                    "predicted_letter": predicted,
-                    "is_correct": is_correct,
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"article_id={item.get('article_id')}: {e}.")
-            results.append(
-                {
-                    "article_id": item["article_id"],
-                    "question": item["question"],
-                    "correct_answer": item["answer"],
-                    "option_A": options[0],
-                    "option_B": options[1],
-                    "option_C": options[2],
-                    "option_D": options[3],
-                    "correct_letter": correct_letter,
-                    "model_response": None,
-                    "predicted_letter": None,
-                    "is_correct": False,
-                }
-            )
-            total_err += 1
+        results.append(
+            {
+                "article_id": item["article_id"],
+                "question": item["question"],
+                "correct_answer": item["answer"],
+                "option_A": options[0],
+                "option_B": options[1],
+                "option_C": options[2],
+                "option_D": options[3],
+                "correct_letter": correct_letter,
+                "model_response": model_response,
+                "predicted_letter": predicted,
+                "is_correct": is_correct,
+            }
+        )
 
     accuracy = correct / total if total > 0 else 0
 
@@ -302,6 +327,18 @@ def main():
     parser.add_argument("--max_results", type=int, default=None, help="Maximum number of rows to process")
     parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
     parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Number of concurrent requests kept in flight (1 = sequential)",
+    )
+    parser.add_argument(
+        "--num_retries",
+        type=int,
+        default=DEFAULT_NUM_RETRIES,
+        help="LiteLLM retries for transient failures (rate limits, timeouts)",
+    )
     parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
     parser.add_argument("--results_dir", type=str, default=DEFAULT_RESULTS_DIR, help="Folder for storing results")
     parser.add_argument(
@@ -329,6 +366,7 @@ def main():
         ("Language", args.lang),
         ("Temperature", args.temperature),
         ("Seed", args.seed),
+        ("Batch size", args.batch_size),
         ("Results directory", args.results_dir),
     ]
 
@@ -357,6 +395,8 @@ def main():
         results_dir=args.results_dir,
         llm_api_key=args.llm_api_key,
         llm_uri=args.llm_uri,
+        batch_size=args.batch_size,
+        num_retries=args.num_retries,
     )
 
     results_table = [
