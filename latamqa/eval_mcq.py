@@ -225,7 +225,7 @@ def run_evaluation(
         for future in tqdm(
             as_completed(future_to_idx),
             total=len(tasks),
-            desc=f"Evaluating «{dataset_name}»",
+            desc=f"Evaluating «{dataset_name}» (lang={lang})",
             leave=False,
         ):
             idx = future_to_idx[future]

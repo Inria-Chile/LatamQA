@@ -239,10 +239,10 @@ Results are saved in the `results` directory (via `--results_dir`) with the foll
 ## `model_eval` batch evaluation
 
 `model_eval.py` evaluates a model defined in `latamqa/models/` across **all six**
-region/language slices in a single run, storing the results locally so they can be
-published with [`leaderboard update`](#leaderboard-management). Unlike `eval_mcq`, the
-model is referenced by its `Model ID` (the YAML file name) rather than a raw LiteLLM
-name.
+region/language slices in a single run (or a subset, via `--region`/`--lang`),
+storing the results locally so they can be published with
+[`leaderboard update`](#leaderboard-management). Unlike `eval_mcq`, the model is
+referenced by its `Model ID` (the YAML file name) rather than a raw LiteLLM name.
 
 ### Subcommands
 
@@ -261,6 +261,8 @@ name.
     | Argument            | Default    | Description                                                  |
     | :------------------ | :--------- | :----------------------------------------------------------- |
     | `--model`           | (required) | Model ID to evaluate (must match a config in `latamqa/models/`, e.g. `llama-3.1-8b`). |
+    | `--region`          | all        | Restrict to one regional dataset: `es-la`, `es-es` or `pt-br`. |
+    | `--lang`            | all        | Restrict to one target language: `regional` or `english`.    |
     | `--max_results`     | `None`     | Limit the number of questions evaluated per slice.           |
     | `--seed`            | `42`       | Random number generator seed for answer shuffling.           |
     | `--temperature`     | `0.0`      | Sampling temperature for the model.                          |

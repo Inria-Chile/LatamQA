@@ -170,6 +170,8 @@ def resolve_model_options(
 
 def compute_results(
     model_name: str,
+    region: str | None = None,
+    lang: str | None = None,
     max_results: int | None = None,
     seed: int = 42,
     temperature: float = 0.0,
@@ -195,14 +197,20 @@ def compute_results(
     num_retries = options["num_retries"]
     llm_uri = options["llm_uri"]
 
-    instances = product(REGIONAL_DATASETS, TARGET_LANGUAGES)
+    # Restrict to a single region and/or language when requested; otherwise cover
+    # every region/language slice (the default whole-benchmark evaluation).
+    regions = [region] if region else REGIONAL_DATASETS
+    langs = [lang] if lang else TARGET_LANGUAGES
+    instances = list(product(regions, langs))
+    if region or lang:
+        logger.info(f"Evaluating {len(instances)} slice(s): {', '.join(f'{r} ({la})' for r, la in instances)}.")
 
     results = {}
 
     current_results_dir = Path(results_dir) / f"{model_name}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     logger.info(f"Storing results for model '{model_name}' in directory: {current_results_dir}")
 
-    for inst in tqdm(list(instances), desc=f"Computing for «{model_name}»", leave=False):
+    for inst in tqdm(instances, desc=f"Computing for «{model_name}»", leave=False):
         region, lang = inst
         result = run_evaluation(
             model["LiteLLM model name"],
@@ -261,6 +269,18 @@ def main():
         required=True,
         help="Model to evaluate (models should be defined in the models directory)",
     )
+    update_parser.add_argument(
+        "--region",
+        choices=REGIONAL_DATASETS,
+        default=None,
+        help="Restrict evaluation to a single regional dataset (default: all regions)",
+    )
+    update_parser.add_argument(
+        "--lang",
+        choices=TARGET_LANGUAGES,
+        default=None,
+        help="Restrict evaluation to a single target language (default: all languages)",
+    )
     update_parser.add_argument("--max_results", type=int, default=None, help="Maximum number of rows to process")
     update_parser.add_argument("--seed", type=int, default=42, help="Seed for shuffling options")
     update_parser.add_argument("--temperature", type=float, default=0.0, help="Temperature")
@@ -305,6 +325,8 @@ def main():
     elif args.command == "evaluate":
         compute_results(
             model_name=args.model,
+            region=args.region,
+            lang=args.lang,
             max_results=args.max_results,
             seed=args.seed,
             temperature=args.temperature,
