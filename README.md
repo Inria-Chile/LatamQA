@@ -176,7 +176,7 @@ python latamqa/eval_mcq.py --model <your-model>
 ### Usage
 
 ```bash
-uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regional,english}] [--max_results MAX_RESULTS] [--seed SEED] [--temperature TEMPERATURE] [--batch_size BATCH_SIZE] [--num_retries NUM_RETRIES] [--prompt_template PROMPT_TEMPLATE] [--results_dir RESULTS_DIR] [--llm_api_key LLM_API_KEY] [--llm_uri LLM_URI]
+uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regional,english}] [--max_results MAX_RESULTS] [--seed SEED] [--temperature TEMPERATURE] [--batch_size BATCH_SIZE] [--num_retries NUM_RETRIES] [--batch_poll_interval BATCH_POLL_INTERVAL] [--prompt_template PROMPT_TEMPLATE] [--results_dir RESULTS_DIR] [--llm_api_key LLM_API_KEY] [--llm_uri LLM_URI]
 ```
 
 | Argument     | Default   | Description  |
@@ -187,8 +187,9 @@ uv run eval_mcq --model MODEL_NAME [--region {es-la,es-es,pt-br}] [--lang {regio
 | `--max_results` | $\infty$ | Limit number of questions evaluated |
 | `--seed` | `42` | Random number generator seed for answer shuffling |
 | `--temperature` | `0.0` | Sampling temperature |
-| `--batch_size` | `16` | Number of requests sent concurrently. Higher values evaluate faster (and let a self-hosted vLLM server batch); set to `1` for the old sequential behavior, or lower it if a provider rate-limits you. |
-| `--num_retries` | `3` | Retries LiteLLM performs for transient failures (rate limits, timeouts) before the question is recorded as an error |
+| `--batch_size` | `16` | Number of requests sent concurrently. Higher values evaluate faster (and let a self-hosted vLLM server batch); set to `1` for the old sequential behavior, or lower it if a provider rate-limits you. Ignored on [Batch API endpoints](#batch-api-endpoints-maritaca). |
+| `--num_retries` | `3` | Retries LiteLLM performs for transient failures (rate limits, timeouts) before the question is recorded as an error. Ignored on [Batch API endpoints](#batch-api-endpoints-maritaca). |
+| `--batch_poll_interval` | `30` | Seconds between status checks when the endpoint uses the asynchronous [Batch API](#batch-api-endpoints-maritaca) (e.g. Maritaca). Ignored for ordinary live-request providers. |
 | `--prompt_template` | `None` | File name of custom prompt template |
 | `--results_dir` | `results/` | Folder for storing results |
 | `--llm_api_key` | `None` | API key for LLM (if needed) |
@@ -258,20 +259,21 @@ referenced by its `Model ID` (the YAML file name) rather than a raw LiteLLM name
     uv run model_eval evaluate --model <model_id> [options]
     ```
 
-    | Argument            | Default    | Description                                                  |
-    | :------------------ | :--------- | :----------------------------------------------------------- |
-    | `--model`           | (required) | Model ID to evaluate (must match a config in `latamqa/models/`, e.g. `llama-3.1-8b`). |
-    | `--region`          | all        | Restrict to one regional dataset: `es-la`, `es-es` or `pt-br`. |
-    | `--lang`            | all        | Restrict to one target language: `regional` or `english`.    |
-    | `--max_results`     | `None`     | Limit the number of questions evaluated per slice.           |
-    | `--seed`            | `42`       | Random number generator seed for answer shuffling.           |
-    | `--temperature`     | `0.0`      | Sampling temperature for the model.                          |
-    | `--batch_size`      | `16`       | Number of requests sent concurrently per slice (`1` = sequential; lower it if rate-limited). May instead be set per-model via the YAML's `Batch size` field — but not in both places (see below). |
-    | `--num_retries`     | `3`        | Retries LiteLLM performs for transient failures before a question is recorded as an error. May instead be set per-model via the YAML's `Number of retries` field — but not in both places (see below). |
-    | `--prompt_template` | `None`     | File name of a custom prompt template.                       |
-    | `--results_dir`     | `results/` | Folder for storing the evaluation results.                   |
-    | `--llm_api_key`     | `None`     | API key for the LLM provider (if needed).                    |
-    | `--llm_uri`         | `None`     | URL for a local/custom LLM provider. May instead be set per-model via the YAML's `LLM URI` field — but not in both places (see below). |
+    | Argument                | Default    | Description |
+    | :---------------------- | :--------- | :----------- |
+    | `--model`               | (required) | Model ID to evaluate (must match a config in `latamqa/models/`, e.g. `llama-3.1-8b`). |
+    | `--region`              | all        | Restrict to one regional dataset: `es-la`, `es-es` or `pt-br`. |
+    | `--lang`                | all        | Restrict to one target language: `regional` or `english`. |
+    | `--max_results`         | `None`     | Limit the number of questions evaluated per slice. |
+    | `--seed`                | `42`       | Random number generator seed for answer shuffling. |
+    | `--temperature`         | `0.0`      | Sampling temperature for the model. |
+    | `--batch_size`          | `16`       | Number of requests sent concurrently per slice (`1` = sequential; lower it if rate-limited). May instead be set per-model via the YAML's `Batch size` field — but not in both places (see below). Ignored on [Batch API endpoints](#batch-api-endpoints-maritaca). |
+    | `--num_retries`         | `3`        | Retries LiteLLM performs for transient failures before a question is recorded as an error. May instead be set per-model via the YAML's `Number of retries` field — but not in both places (see below). Ignored on [Batch API endpoints](#batch-api-endpoints-maritaca). |
+    | `--batch_poll_interval` | `30`       | Seconds between status checks when the endpoint uses the asynchronous [Batch API](#batch-api-endpoints-maritaca) (e.g. Maritaca, auto-detected from the endpoint host). Ignored for live-request providers. |
+    | `--prompt_template`     | `None`     | File name of a custom prompt template. |
+    | `--results_dir`         | `results/` | Folder for storing the evaluation results. |
+    | `--llm_api_key`         | `None`     | API key for the LLM provider (if needed). |
+    | `--llm_uri`             | `None`     | URL for a local/custom LLM provider. May instead be set per-model via the YAML's `LLM URI` field — but not in both places (see below). |
 
     The output files follow the same naming convention as `eval_mcq` (see [Output](#output) above), so the resulting `results/` directory can be passed straight to `leaderboard update --results_dir results/`.
 
@@ -294,6 +296,41 @@ one sets the value it is used, and if neither does the built-in default applies.
 Setting the **same** option in both the YAML and on the command line is reported
 as an *option clash* and stops the run, so the source of truth is never
 ambiguous.
+
+#### Batch API endpoints (Maritaca)
+
+Some providers expose an OpenAI-compatible **asynchronous Batch API** instead of
+(or alongside) live requests. [Maritaca AI](https://docs.maritaca.ai/en/batch-api)
+is one: its endpoint (`https://chat.maritaca.ai/api`) rate-limits bursts of
+concurrent requests, so raising `--batch_size` there just produces *"too many
+requests"* errors. The batch path avoids this entirely.
+
+When the endpoint host is a known Batch API host (currently `chat.maritaca.ai`,
+matched via `LLM URI`/`--llm_uri`), evaluation **automatically** switches from
+firing many concurrent live requests to submitting **all** the slice's questions
+as a *single* batch job — no extra flag needed. Concretely it:
+
+1. writes one request per question to a `batch_input_<slice>.jsonl` file (each
+   tagged with a `custom_id`),
+2. uploads it and creates one batch job (via the OpenAI-compatible Batch API), then
+3. polls until the job completes and maps every answer back to its question by
+   `custom_id` (saving the raw `batch_output_<slice>.jsonl` alongside the CSV).
+
+This sidesteps the rate limits and, on Maritaca, costs **~50% less** — at the
+price of asynchronous latency (a completion window of up to 24h, though jobs
+usually finish much sooner). Because there is no per-request fan-out on this
+path, **`--batch_size` and `--num_retries` do not apply**; `--batch_poll_interval`
+(default `30s`) controls how often the job's status is checked.
+
+```bash
+# Auto-detected from the endpoint pinned in latamqa/models/sabia-4-thinking.yaml;
+# submits one batch job per slice and blocks until each completes.
+uv run model_eval evaluate --model sabia-4-thinking --llm_api_key "$MARITACA_API_KEY"
+
+# Single-slice equivalent, pointing at the endpoint explicitly:
+uv run eval_mcq --model openai/sabia-4-thinking --llm_uri https://chat.maritaca.ai/api \
+    --llm_api_key "$MARITACA_API_KEY" --batch_poll_interval 15
+```
 
 #### Model configuration schema
 
