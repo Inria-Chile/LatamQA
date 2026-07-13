@@ -15,6 +15,7 @@ dependencies = [
     "tabulate",
     "gradio-leaderboard",
     "litellm",
+    "openai",
     "jsonschema",
     "ollama>=0.6.1",
     "gradio>=5.50.0",

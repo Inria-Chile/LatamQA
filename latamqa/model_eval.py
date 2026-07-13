@@ -12,6 +12,7 @@ from structlog import get_logger
 from tqdm.auto import tqdm
 
 from latamqa.eval_mcq import (
+    DEFAULT_BATCH_POLL_INTERVAL,
     DEFAULT_BATCH_SIZE,
     DEFAULT_NUM_RETRIES,
     DEFAULT_RESULTS_DIR,
@@ -101,8 +102,7 @@ def _validate_int(minimum: int):
 
         if number is None or number < minimum:
             logger.fatal(
-                f"Invalid «{option}» for model «{model_name}» ({source}): "
-                f"expected an integer >= {minimum}, got {value!r}."
+                f"Invalid «{option}» for model «{model_name}» ({source}): expected an integer >= {minimum}, got {value!r}."
             )
             exit(-1)
         return number
@@ -113,10 +113,7 @@ def _validate_int(minimum: int):
 def _validate_str(model_name: str, source: str, option: str, value: object) -> str:
     """Validate that a resolved option is a non-empty string, or stop the run."""
     if not isinstance(value, str) or not value.strip():
-        logger.fatal(
-            f"Invalid «{option}» for model «{model_name}» ({source}): "
-            f"expected a non-empty string, got {value!r}."
-        )
+        logger.fatal(f"Invalid «{option}» for model «{model_name}» ({source}): expected a non-empty string, got {value!r}.")
         exit(-1)
     return value
 
@@ -181,6 +178,7 @@ def compute_results(
     llm_uri: str | None = None,
     batch_size: int | None = None,
     num_retries: int | None = None,
+    batch_poll_interval: int = DEFAULT_BATCH_POLL_INTERVAL,
 ) -> dict[str, float | str | int]:
     model = load_models(MODELS_DIR)[model_name]
 
@@ -225,6 +223,7 @@ def compute_results(
             max_results=max_results,
             batch_size=batch_size,
             num_retries=num_retries,
+            batch_poll_interval=batch_poll_interval,
         )
         results[f"{region} ({lang})"] = result["accuracy"]
     return results
@@ -302,6 +301,16 @@ def main():
             f"'Number of retries' field; setting it in both places is an error. Defaults to {DEFAULT_NUM_RETRIES}."
         ),
     )
+    update_parser.add_argument(
+        "--batch_poll_interval",
+        type=int,
+        default=DEFAULT_BATCH_POLL_INTERVAL,
+        help=(
+            f"Seconds between status checks for endpoints that use the async Batch API (e.g. Maritaca, "
+            f"auto-detected from the endpoint host). Ignored for live-request providers. "
+            f"Defaults to {DEFAULT_BATCH_POLL_INTERVAL}."
+        ),
+    )
     update_parser.add_argument("--prompt_template", type=str, default=None, help="File name of custom prompt template")
     update_parser.add_argument("--results_dir", type=str, default=DEFAULT_RESULTS_DIR, help="Folder for storing results")
     update_parser.add_argument(
@@ -336,6 +345,7 @@ def main():
             llm_uri=args.llm_uri,
             batch_size=args.batch_size,
             num_retries=args.num_retries,
+            batch_poll_interval=args.batch_poll_interval,
         )
 
 
