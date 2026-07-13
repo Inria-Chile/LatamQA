@@ -1,6 +1,13 @@
 # Maritaca AI has no native LiteLLM provider; use the OpenAI-compatible route.
 # The endpoint is pinned via "LLM URI" below, so only the API key is needed, e.g.:
 #   uv run model_eval evaluate --model sabia-4-thinking --llm_api_key "$MARITACA_API_KEY"
+#
+# Because the endpoint host (chat.maritaca.ai) exposes an OpenAI-compatible
+# asynchronous Batch API, evaluation auto-submits all questions as ONE batch job
+# instead of many concurrent live requests. This avoids Maritaca's rate limits
+# (the cause of errors when --batch_size > 1) and is ~50% cheaper, at the cost of
+# asynchronous latency (up to a 24h completion window). Poll cadence is tunable
+# via --batch_poll_interval; --batch_size / --num_retries do not apply here.
 LiteLLM model name: openai/sabia-4-thinking
 LLM URI: https://chat.maritaca.ai/api
 Model name: Sabiá-4 Thinking
@@ -8,3 +15,8 @@ Model URL: https://www.maritaca.ai/en/blog/sabia-4
 Model size: undisclosed
 Model type: large
 Paper URL: https://arxiv.org/abs/2603.10213
+# Optional per-model evaluation tuning. Uncomment to pin a value here instead of
+# passing --batch_size / --num_retries on the command line. Setting the same
+# option in both places stops the run with an "option clash" error.
+# Batch size: 8
+# Number of retries: 5
