@@ -6,37 +6,38 @@ Universal script to evaluate models through API (OpenAI, Mistral, Anthropic, Oll
 import argparse
 import json
 import os
-import random
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List
 
 import pandas as pd
 import structlog
 from datasets import load_dataset
-from litellm import completion
 from litellm.exceptions import AuthenticationError, BadRequestError
 from rich.console import Console
 from rich.markdown import Markdown
 from tqdm.auto import tqdm
 
+# The MCQ core (prompt template, letter parser, prompt builder, deterministic
+# shuffle, and the single-question LLM call) lives in the dependency-light
+# `mcq_core` leaf module so it can be imported without dragging in pandas /
+# datasets / rich / tqdm. Re-exported here so existing imports keep working:
+#   from latamqa.eval_mcq import evaluate_mcq, extract_answer, build_prompt, ...
+from latamqa.mcq_core import (  # noqa: F401  (re-exported for backwards compatibility)
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_NUM_RETRIES,
+    DEFAULT_PROPMT_TEMPLATE,
+    build_prompt,
+    evaluate_mcq,
+    evaluate_mcq_dict,
+    extract_answer,
+    shuffle_options,
+)
+
 logger = structlog.get_logger()
 
 DEFAULT_RESULTS_DIR = Path(__file__).parent.parent / "results"
-
-DEFAULT_PROPMT_TEMPLATE: str = """"Answer the following multiple-choice question by selecting ONLY the letter (A, B, C, or D) of the correct answer.
-
-Question: {question}
-
-A) {option_a}
-B) {option_b}
-C) {option_c}
-D) {option_d}
-
-Answer:
-"""  # noqa: E501
 
 REGIONAL_DATASETS = ["es-la", "es-es", "pt-br"]
 TARGET_LANGUAGES = ["regional", "english"]
@@ -46,13 +47,6 @@ TARGET_LANGUAGES = ["regional", "english"]
 # large speedup against API providers and lets a self-hosted vLLM server use
 # its continuous batching.
 DEFAULT_BATCH_SIZE = 16
-# LiteLLM-side retries for transient failures (rate limits, timeouts, blips).
-DEFAULT_NUM_RETRIES = 3
-# Completion-token cap per question. Only a letter (A/B/C/D) is needed, but this
-# budget must also cover any hidden reasoning a "thinking" model emits before its
-# answer — too low a cap truncates those models to an empty response. Plain models
-# are unaffected: they stop right after the letter, so the higher ceiling is free.
-DEFAULT_MAX_TOKENS = 2048
 
 # Endpoints exposing an OpenAI-compatible *asynchronous* Batch API. When an
 # evaluation targets one of these hosts, every question is packed into a single
@@ -70,98 +64,6 @@ BATCH_IN_PROGRESS_STATUSES = frozenset({"validating", "in_progress", "finalizing
 def sanitize(s: str) -> str:
     """Sanitize string for use in filenames."""
     return s.replace("/", "-").replace(":", "-")
-
-
-def shuffle_options(
-    answer: str,
-    d1: str,
-    d2: str,
-    d3: str,
-    seed: int,
-) -> Tuple[List[str], str]:
-    """Shuffle options and return (options_list, correct_letter)."""
-    options = [
-        ("answer", answer),
-        ("d1", d1),
-        ("d2", d2),
-        ("d3", d3),
-    ]
-    random.seed(seed)
-    random.shuffle(options)
-
-    correct_idx = next(i for i, (label, _) in enumerate(options) if label == "answer")
-    correct_letter = chr(ord("A") + correct_idx)
-
-    return [opt[1] for opt in options], correct_letter
-
-
-def extract_answer(response: str) -> str | None:
-    """Extract the letter (A, B, C, D) from the model's response."""
-    response_ini = response.strip()
-    response = response.upper().strip()
-    if response and response[0] in "ABCD":
-        return response[0]
-    match = re.search(r"\b([ABCD])[\).]", response)
-    if match:
-        return match.group(1)
-    match = re.search(r"\b([ABCD])\b", response)
-    if match:
-        if match.group(1) == "A":
-            start, end = match.span()
-            if response_ini[start:end] == "a":
-                return None
-            else:
-                return "A"
-        else:
-            return match.group(1)
-    return None
-
-
-def build_prompt(prompt_template: str, question: str, options: List[str]) -> str:
-    """Fill the prompt template with the question and its (shuffled) options."""
-    prompt = prompt_template.replace("{question}", question)
-    prompt = prompt.replace("{option_a}", options[0])
-    prompt = prompt.replace("{option_b}", options[1])
-    prompt = prompt.replace("{option_c}", options[2])
-    prompt = prompt.replace("{option_d}", options[3])
-    return prompt
-
-
-def evaluate_mcq(
-    model: str,
-    prompt_template: str,
-    question: str,
-    options: List[str],
-    temperature: float,
-    llm_api_key: str | None = None,
-    llm_uri: str | None = None,
-    num_retries: int = DEFAULT_NUM_RETRIES,
-) -> str:
-    """Ask the LLM to answer a single MCQ via LiteLLM and return its raw response.
-
-    Transient failures (rate limits, timeouts, connection blips) are retried
-    internally by LiteLLM up to ``num_retries`` times. Any error that survives
-    the retries propagates to the caller, which decides whether it is fatal for
-    the whole run or should be recorded as a single failed question. This keeps
-    the function thread-safe so it can be fanned out across a thread pool.
-    """
-    prompt = build_prompt(prompt_template, question, options)
-
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": DEFAULT_MAX_TOKENS,  # a letter, plus room for a thinking model's reasoning
-        "num_retries": num_retries,
-    }
-
-    if llm_api_key:
-        kwargs["api_key"] = llm_api_key
-    if llm_uri:
-        kwargs["api_base"] = llm_uri
-
-    resp = completion(**kwargs)
-    return resp.choices[0].message.content.strip()  # type: ignore
 
 
 def _run_live_requests(
