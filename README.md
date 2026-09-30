@@ -355,6 +355,97 @@ like `Model typ` are caught immediately.
 | `Number of retries`  | ➖        | integer | Per-model retry count, `≥ 0` (see above).                             |
 | `show_in_leaderboard`| ➖        | boolean | Set `false` to hide the model from the public leaderboard.           |
 
+## `panel`: open-weight panel on Hugging Face Inference Providers
+
+`panel` evaluates a whole **panel** of models on a question set at once, each
+model pinned to one [Hugging Face Inference Provider](https://huggingface.co/docs/inference-providers),
+in its own process, at a fixed request rate (13.3 req/s per model by default:
+20,000 questions in 25 minutes). It uses **protocol v2** (below); `eval_mcq`,
+`model_eval` and the leaderboard keep protocol v1, so published numbers stay
+reproducible. Every request is billed to the panel's Hugging Face organisation
+through the `X-HF-Bill-To` header, and `HF_TOKEN` must be set.
+
+```bash
+uv run panel check                                                           # free: token, billing org, routes, gated access, retirements
+uv run panel run --questions new_set.parquet --run 1 --limit 2000 --yes     # dress rehearsal on a stable subset
+uv run panel run --questions new_set.parquet --run 1 --yes                  # full run 1, then --run 2 ... --run 5
+uv run panel report --set_name new_set --run 1                              # rebuild a run's report from its logs
+```
+
+Add `--dry_run` to run everything offline against a fake provider (no network,
+no cost). Re-running the same `run` command resumes it: only questions without
+an answer are sent.
+
+### Panels
+
+A panel is a YAML file in [`latamqa/panels/`](latamqa/panels/), validated
+against the schema in [`latamqa/panel.py`](latamqa/panel.py). Panel models are
+deliberately kept out of `latamqa/models/`, so `model_eval` and the leaderboard
+never call them without their billing header and reasoning switch. The default
+panel, [`p6`](latamqa/panels/p6.yaml), was verified in a paid pilot (routes,
+reasoning switches, answer format and throughput):
+
+| Key            | Model                          | Provider  | Reasoning switch (`extra_body`)      |
+| :------------- | :----------------------------- | :-------- | :----------------------------------- |
+| `qwen3-4b`     | Qwen3-4B-Instruct-2507          | nscale    | none needed                          |
+| `llama-3.1-8b` | Llama-3.1-8B-Instruct           | novita    | none needed                          |
+| `qwen3.5-9b`   | Qwen3.5-9B                      | deepinfra | `reasoning_effort: none`             |
+| `qwen3.5-27b`  | Qwen3.5-27B                     | deepinfra | `reasoning_effort: none`             |
+| `qwen2.5-72b`  | Qwen2.5-72B-Instruct            | novita    | none needed                          |
+| `qwen3.5-397b` | Qwen3.5-397B-A17B               | deepinfra | `reasoning_effort: none`             |
+| `kimi-k2`      | Kimi-K2-Instruct                | novita    | `thinking: {type: disabled}`         |
+
+Each model entry sets `key`, `hub_id`, `provider`, `price` (USD per million
+input/output tokens, for cost estimates), `max_in_flight`, and optionally
+`api_base` (DeepInfra must use its `/v1/openai` router route), `extra_body`,
+`size` and `note`. Verified `alternatives` can replace a panel model with
+`--swap`, e.g. `--swap qwen2.5-72b=qwen2.5-72b-di`.
+
+### Protocol v2
+
+| | v1 (`eval_mcq`, `model_eval`, leaderboard) | v2 (`panel`) |
+| :-- | :-- | :-- |
+| Option order | `seed + hash(article_id)`, which Python salts per process: it changes on every run | five fixed orders per question: runs 1–4 are the cyclic shifts of one stable shuffle, run 5 an independent one |
+| Prompt | template with a stray leading `"`, no system message, `max_tokens` 2048 | same template without the quote, system message `Answer with a single letter: A, B, C, or D.`, `max_tokens` 16 |
+| Reasoning | not controlled | each model's switch is sent; any reasoning is flagged as a leak and counted as wrong |
+| Parsing | first character if it is A–D, then the first standalone letter | bare letter, then a letter-first reply (`B) option text`), then an explicit answer cue ("la respuesta es D") |
+| Scoring | correct ÷ answered | correct ÷ all questions (errors, unparsable and leaked answers count as wrong), plus coverage |
+
+The helpers live in [`latamqa/mcq_core.py`](latamqa/mcq_core.py)
+(`permuted_options`, `parse_answer_v2`, `V2_*` constants).
+
+### Options
+
+| Argument | Default | Description |
+| :------- | :------ | :---------- |
+| `--panel` | `p6` | Panel name in `latamqa/panels/`, or a path to a panel YAML. |
+| `--questions` | (required for `run`) | Question set: a `.parquet`, `.csv`, `.jsonl` or `.json` file, or `hf:org/name[:split]`. |
+| `--set_name` | file stem | Name used in output paths. |
+| `--run` | `1` | Run number = option order, `1`–`5`. |
+| `--limit` | all | Use a stable random subset of N questions (dress rehearsal). |
+| `--models` / `--swap` | the panel | Run a subset of keys, or replace a model (`old=new`). |
+| `--rate` / `--cap` | `13.3` / `max_in_flight` | Requests per second per model; in-flight cap override (`key=N`). |
+| `--col_id`, `--col_question`, `--col_answer`, `--col_distractors`, `--col_group` | LatamQA columns | Map the question set's columns; `--col_group` (e.g. a language column) adds accuracy by group. |
+| `--max_leaks` / `--max_error_rate` / `--retry_rounds` | `10` / `0.01` / `2` | A model stops after this many reasoning leaks, or above this error rate (after 500 requests); failed questions get this many slower retry passes. |
+| `--budget_usd` | `40` | Refuse to start if the cost estimate exceeds this. |
+| `--bill_to` | panel's `bill_to` | Hugging Face organisation billed for the requests. |
+| `--yes` / `--dry_run` | | Confirm a paid run / run offline. |
+
+HTTP 402 and the organisation's spending-limit 403 stop every model of the run
+(raise the limit, then re-run the same command to resume). Hugging Face holds a
+provisional $0.01 per request for about two minutes, so a full-speed run of
+seven models carries roughly $60–120 of holds at any moment although it costs
+about $10; keep the organisation's spending limit well above that.
+
+### Output
+
+Results go to `results/panel/<panel>/<set_name>/run<N>/`:
+
+* `<key>.jsonl`: one record per request (reply, finish reason, token usage, reasoning fields, serving provider, returned model, latency, errors);
+* `mcq_eval_results_<set>_run<N>_<key>.csv` and `mcq_eval_summary_<set>-<group>_run<N>_<key>.txt`: the harness's file formats, plus the parse rule of each answer and a `protocol: v2` line;
+* `summary_<key>.json`, `report.md` and `report.json`: accuracy with a 95 % interval, coverage, leaks, latency, cost, and whether the run is publishable (every model answers at least 99.5 % of the questions, with no leak and no stop);
+* `items.json` and `run_meta.json`: the exact questions, option orders, request settings and models of the run.
+
 ## Leaderboard Management
 
 The `leaderboard` command-line tool manages and visualizes the leaderboard. Evaluation
