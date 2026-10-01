@@ -354,7 +354,9 @@ class RunWatch:
                 self.watch_live(procs)
             else:
                 while any(p.is_alive() for p in procs.values()):
-                    time.sleep(progress_s)
+                    end = time.time() + progress_s  # print every progress_s, and once more as soon as all have ended
+                    while time.time() < end and any(p.is_alive() for p in procs.values()):
+                        time.sleep(min(REFRESH_S, progress_s))
                     self.update()
                     print(self.line(), flush=True)
         except KeyboardInterrupt:

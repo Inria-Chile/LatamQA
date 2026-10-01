@@ -214,9 +214,9 @@ LETTERS = "ABCD"
 
 _BARE = re.compile(r"^[\W_]*([ABCD])[\).]?[\W_]*$")
 _LETTER_LED = re.compile(r"^[\W_]*([ABCD])\)\s+\S")
-_CUE = re.compile(
+_CUE = re.compile(  # the letter itself is case-sensitive: "a resposta é a capital" is not A
     r"(?:answer|respuesta|resposta|alternativa|opci[oó]n|op[cç][aã]o|letra)[^A-Za-z\n]{0,20}"
-    r"(?:(?:correcta|correta|correct|es|é|is|la|a)\s+){0,3}[\(\*\"']*([ABCD])\b",
+    r"(?:(?:correcta|correta|correct|es|é|is|la|a)\s+){0,3}[\(\*\"']*((?-i:[ABCD]))\b",
     re.IGNORECASE,
 )
 _THINK_TAG = re.compile(r"<think|</think>", re.IGNORECASE)
@@ -270,6 +270,8 @@ def parse_answer_v2(text: str | None) -> Tuple[str | None, str]:
     >>> parse_answer_v2("La respuesta correcta es D.")
     ('D', 'cue')
     >>> parse_answer_v2("A resposta não está clara")
+    (None, 'none')
+    >>> parse_answer_v2("A resposta correta é a capital")
     (None, 'none')
     """
     text = text or ""

@@ -238,8 +238,11 @@ class Wiki:
                 status, r = 599, None
             self._last = time.time()
             if status == 429 or status >= 500:
-                retry_after = (r.headers.get("retry-after") if r is not None else None) or 2**attempt
-                time.sleep(min(float(retry_after), 60) * (1 + random.random() * 0.2))
+                try:  # Retry-After is seconds or an HTTP date
+                    retry_after = float(r.headers.get("retry-after") or 2**attempt) if r is not None else 2**attempt
+                except ValueError:
+                    retry_after = 2**attempt
+                time.sleep(min(retry_after, 60) * (1 + random.random() * 0.2))
                 continue
             return status, r.text if r is not None else ""
         return status, ""
@@ -338,7 +341,8 @@ def check_question(question: dict, wiki: Wiki) -> dict:
             result["issues"].append(f"cited article {lang}:{title} is a disambiguation page; cite the specific article")
         else:
             articles.append(a)
-    linked = {a["qid"] for a in articles if a.get("qid")}
+    cited = list(articles)  # the linked articles; a bare id's own article, added below, is not one of them
+    linked = {a["qid"] for a in cited if a.get("qid")}
     for qid in qids:
         e = wiki.entity(qid)
         if e is None:
@@ -348,10 +352,10 @@ def check_question(question: dict, wiki: Wiki) -> dict:
         if e.get("missing"):
             result["issues"].append(f"Wikidata {qid} does not exist")
             continue
-        if articles and qid not in linked:
-            cited = ", ".join(f"«{a['title']}» ({a.get('qid')})" for a in articles)
-            result["issues"].append(f"{qid} («{e['label']}») is not the item of the cited article {cited}")
-        elif not articles:
+        if cited and qid not in linked:
+            titles = ", ".join(f"«{a['title']}» ({a.get('qid')})" for a in cited)
+            result["issues"].append(f"{qid} («{e['label']}») is not the item of the cited article {titles}")
+        elif not cited:
             for lang in (question_language(question), "en"):
                 title = e["sitelinks"].get(f"{lang}wiki")
                 if not title:
@@ -524,6 +528,8 @@ def check_all(
             verdict, flag = reader_verdict(letter, order, q)
             r = results[q["id"]]
             r.update(reader_reply=reply[:200], reader_verdict=verdict)
+            if letter is None and reply.startswith("error: "):  # a failed request: let the next verify ask again
+                r.pop("reader", None)
             if flag:
                 r["flag"] = True
                 r["issues"].append(verdict)

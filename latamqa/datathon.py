@@ -156,6 +156,7 @@ def snapshot_db(source: str, dest_dir: Path) -> tuple[Path, str]:
         dst = sqlite3.connect(dest)
         try:
             src.backup(dst)
+            dst.execute("PRAGMA journal_mode=DELETE")  # a plain file: no -wal/-shm left beside each snapshot
         finally:
             src.close()
             dst.close()
@@ -756,7 +757,10 @@ def stage_verify(args, panel: dict, specs: list[dict]) -> None:
     if args.reader:
         known = pn.all_models(panel)  # the run's panel first, then any panel file (e.g. a P6 model for P6-small)
         for path in sorted(pn.PANELS_DIR.glob("*.yaml")):
-            known = pn.all_models(pn.load_panel(path)) | known
+            try:
+                known = pn.all_models(pn.load_panel(path)) | known
+            except pn.PanelError as e:  # another panel's broken file must not block this one's reader
+                logger.warning(str(e))
         if args.reader not in known:
             raise pn.PanelError(f"--reader {args.reader}: unknown model key; known: {sorted(known)}")
         reader = known[args.reader]

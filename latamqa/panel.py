@@ -139,7 +139,10 @@ def load_panel(name_or_path: str | Path = DEFAULT_PANEL) -> dict:
         path = PANELS_DIR / f"{name_or_path}.yaml"
     if not path.exists():
         raise PanelError(f"panel file not found: {path}")
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        raise PanelError(f"invalid panel {path.name}: not valid YAML ({e})") from e
     errors = validate_panel(config)
     if errors:
         raise PanelError(f"invalid panel {path.name}:\n" + "\n".join(f"  • {e}" for e in errors))
@@ -504,12 +507,16 @@ def score(rec: dict | None) -> tuple[str | None, str]:
 
 
 def latest_records(path: Path) -> dict[str, dict]:
-    """Last record per question; a 200 supersedes any error before or after it."""
+    """Last record per question; a 200 supersedes any error before or after it. A line cut short by a killed worker
+    is skipped (its question is asked again)."""
     last: dict[str, dict] = {}
     if path.exists():
         with open(path, encoding="utf-8") as f:
             for line in f:
-                r = json.loads(line)
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
                 if r["qid"] not in last or r["status"] == 200 or last[r["qid"]]["status"] != 200:
                     last[r["qid"]] = r
     return last
@@ -635,6 +642,11 @@ def run_model(
                 pool.submit(job, item)
 
     t_start = time.time()
+    if log_path.exists() and log_path.stat().st_size:  # end a line cut short by a killed worker
+        with open(log_path, "r+b") as f:
+            f.seek(-1, os.SEEK_END)
+            if f.read(1) != b"\n":
+                f.write(b"\n")
     with open(log_path, "a", encoding="utf-8") as f:
         one_pass([it for it in items if done.get(it["qid"], {}).get("status") != 200], rate, cap, f)
         for _ in range(retry_rounds):  # slower passes for questions still without a 200

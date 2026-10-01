@@ -230,3 +230,14 @@ def test_worker_output_goes_to_its_log_with_the_live_display(run_dir):
     with plain.worker_output("m2"):  # without the live display the worker keeps the parent's output
         assert os.fstat(1).st_ino == stdout
     assert not (run_dir / "m2.worker.log").exists()
+
+
+def test_watch_ends_soon_after_the_workers(run_dir, monkeypatch, capsys):
+    import time
+
+    monkeypatch.setattr(pg, "REFRESH_S", 0.01)
+    watch = pg.RunWatch(SPECS, run_dir, 6, console=_console())
+    t0 = time.time()
+    watch.watch(_Procs(run_dir, {"m1": ["Equipo Uno|0"], "m2": []}), progress_s=60)
+    assert time.time() - t0 < 5  # not a whole --progress_s after the last worker ended
+    assert capsys.readouterr().out.splitlines()[-1].split("] ")[1].startswith("m1 1/6")

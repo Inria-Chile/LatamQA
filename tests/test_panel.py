@@ -504,3 +504,24 @@ def test_progress_counts_leaks_like_the_stop_rule(tmp_path, monkeypatch, p6, cap
     args = dict(dry_run=True, cap=None, rate=1.0, max_leaks=3, max_error_rate=0.01, retry_rounds=2, progress_s=0)
     pn.run_panel_processes([spec], 10, tmp_path, types.SimpleNamespace(**args), "org", strict_leaks=strict)
     assert f"qwen3-4b 1/10 err 0 {shown}" in capsys.readouterr().out
+
+
+def test_a_line_cut_by_a_killed_worker_is_asked_again(tmp_path, monkeypatch, p6, no_sleep):
+    spec = p6["models"][0]
+    items = pn.build_items(ROWS[:3], order=1)
+    log = tmp_path / f"{spec['key']}.jsonl"
+    ok = dict(qid=items[0]["qid"], status=200, content=items[0]["correct"], finish="stop", completion_tokens=1)
+    log.write_text(json.dumps(ok) + "\n" + '{"qid": "' + items[1]["qid"] + '", "sta')  # killed mid-write
+    assert set(pn.latest_records(log)) == {items[0]["qid"]}
+    fake = FakeLiteLLM()
+    _run_worker(tmp_path, monkeypatch, spec, fake, n=3)
+    assert len(fake.calls) == 2  # the cut question and the one never asked
+    lines = log.read_text().splitlines()
+    assert lines[1].endswith('"sta') and all(json.loads(line) for line in lines[2:])  # new records on new lines
+    assert len(pn.latest_records(log)) == 3
+
+
+def test_a_panel_file_that_is_not_yaml_is_a_panel_error(tmp_path):
+    (tmp_path / "broken.yaml").write_text("name: [unclosed\n")
+    with pytest.raises(pn.PanelError, match="not valid YAML"):
+        pn.load_panel(tmp_path / "broken.yaml")

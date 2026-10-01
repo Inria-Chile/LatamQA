@@ -507,3 +507,26 @@ def test_source_report_shows_participant_text_verbatim(tmp_path, capsys):
     path = dtn.write_source_report(checks, accepted, tmp_path)
     out = capsys.readouterr().out
     assert "Equipo [/x]" in out and "[bold]Sí" in out and path.exists()
+
+
+def test_snapshot_of_a_wal_database_is_a_single_file(db, tmp_path):
+    con = sqlite3.connect(db)
+    con.execute("PRAGMA journal_mode=WAL")
+    con.close()
+    copy, _ = dtn.snapshot_db(str(db), tmp_path / "snaps")
+    dtn.read_db(copy)
+    assert [p.name for p in (tmp_path / "snaps").iterdir()] == [copy.name]
+
+
+@pytest.mark.parametrize("broken", ["name: [unclosed\n", "name: x\n"])  # not YAML; not a valid panel
+def test_verify_reader_skips_a_broken_panel_file(db, tmp_path, monkeypatch, broken):
+    p6 = str(pn.PANELS_DIR / "p6.yaml")
+    panels = tmp_path / "panels"
+    panels.mkdir()
+    (panels / "broken.yaml").write_text(broken)
+    monkeypatch.setattr(pn, "PANELS_DIR", panels)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    out = tmp_path / "out"
+    dtn.main(["verify", "--db", str(db), "--results_dir", str(out), "--panel", p6, "--models", "qwen3-4b",
+              "--reader", "qwen3-4b", "--dry_run"])  # fmt: skip
+    assert (out / "llaca-2026" / "source_checks.json").exists()

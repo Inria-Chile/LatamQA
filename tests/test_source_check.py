@@ -270,3 +270,41 @@ def test_a_failed_article_behind_a_wikidata_id_is_retried(tmp_path, wiki, web):
     web.fail.add("https://es.wikipedia.org/wiki/R%C3%ADo_Colorado_(Argentina)")
     r = sc.check_question(question(answer="Río Colorado", sources="Q270627"), wiki)
     assert r["retry"] and r["issues"] == ["could not fetch es:Río Colorado (Argentina)"]  # not "has no article"
+
+
+def test_several_bare_wikidata_ids_are_each_read_through_their_article(wiki, monkeypatch):
+    ayala = {"id": "Q1781472", "labels": {"es": {"value": "Plan de Ayala"}}}
+    ayala["sitelinks"] = {"eswiki": {"title": "Plan de Ayala"}}
+    monkeypatch.setitem(ENTITIES, "Q1781472", ayala)
+    r = sc.check_question(question(sources="Q1781472, Q270627"), wiki)
+    assert r["issues"] == [] and r["verdict"] == "key in source" and not r["flag"]
+    assert r["articles"] == ["es:Plan de Ayala (Q1781472)", "es:Río Colorado (Argentina) (Q270627)"]
+
+
+def test_a_failed_reader_request_is_asked_again(tmp_path, wiki):
+    class BadRequestError(Exception):
+        status_code = 400
+
+    def completion(**kw):
+        raise BadRequestError("model not available")
+
+    qs = [question("a", sources="https://es.wikipedia.org/wiki/Plan_de_Ayala")]
+    broken = types.SimpleNamespace(completion=completion)
+    checks, new = sc.check_all(qs, tmp_path, wiki, reader=READER, litellm=broken, bill_to="org", token="tok")
+    assert new == 1 and checks["a"]["reader_verdict"] == "reader: no answer" and "reader" not in checks["a"]
+    llm = fake_litellm("A")
+    checks, new = sc.check_all(qs, tmp_path, wiki, reader=READER, litellm=llm, bill_to="org", token="tok")
+    assert new == 1 and len(llm.calls) == 1 and checks["a"]["reader"] == READER["key"]
+    assert checks["a"]["reader_verdict"] == "reader agrees"
+
+
+def test_retry_after_as_an_http_date(tmp_path, monkeypatch):
+    import httpx
+
+    throttled = httpx.Response(429, headers={"retry-after": "Wed, 01 Oct 2026 12:00:00 GMT"})
+    replies = iter([throttled, httpx.Response(200, text="ok")])
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: next(replies))
+    slept = []
+    monkeypatch.setattr(sc.time, "sleep", slept.append)
+    assert sc.Wiki(tmp_path / "cache", pause=0)._http("https://es.wikipedia.org/wiki/X") == (200, "ok")
+    assert len(slept) == 1 and slept[0] <= 1.2  # the first retry's backoff instead of a crash

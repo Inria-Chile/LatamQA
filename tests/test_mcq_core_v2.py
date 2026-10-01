@@ -101,6 +101,8 @@ def test_v1_shuffle_is_unchanged():
         (None, (None, "none")),
         ("I am not sure", (None, "none")),
         ("A resposta não está clara", (None, "none")),
+        ("A resposta correta é a capital", (None, "none")),  # the article "a" after a cue is not the letter A
+        ("The answer is a city", (None, "none")),
     ],
 )
 def test_parse_answer_v2(reply, expected):
