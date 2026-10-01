@@ -129,8 +129,14 @@ def test_read_db_rejects_other_databases(tmp_path):
 
 
 def test_snapshot_copies_a_local_database(db, tmp_path):
-    copy = dtn.snapshot_db(str(db), tmp_path / "snaps")
+    import datetime as dt
+    import os
+
+    written = dt.datetime(2026, 10, 3, 13, 20, tzinfo=dt.timezone.utc).timestamp()
+    os.utime(db, (written, written))
+    copy, data_as_of = dtn.snapshot_db(str(db), tmp_path / "snaps")
     assert copy.parent == tmp_path / "snaps" and dtn.read_db(copy)[1] == dtn.read_db(db)[1]
+    assert data_as_of == "2026-10-03T13:20:00Z"
     with pytest.raises(pn.PanelError, match="not found"):
         dtn.snapshot_db(str(tmp_path / "missing.db"), tmp_path / "snaps")
 
@@ -347,3 +353,144 @@ def test_verify_stage_without_network(db, tmp_path, monkeypatch):
     assert calls == []  # no sources cited, nothing fetched
     assert "Source check: 4 of 4 questions checked" in (event / "ranking_latest.md").read_text()
     assert list((event / "rankings").glob("sources_*.csv"))
+
+
+# ---------------------------------------------------------------------------------------------------------- publishing
+
+
+class FakeHub:
+    """Stands in for `huggingface_hub.HfApi`: records calls; the repo is private, public or missing."""
+
+    def __init__(self, repo="private", fail_commit=False):
+        self.repo, self.fail_commit, self.calls, self.files = repo, fail_commit, [], {}
+
+    def repo_info(self, repo_id, repo_type=None):
+        from huggingface_hub.errors import RepositoryNotFoundError
+
+        self.calls.append(("repo_info", repo_id, repo_type))
+        if self.repo == "missing":
+            raise RepositoryNotFoundError("404 Client Error: Repository Not Found")
+        return types.SimpleNamespace(private=self.repo == "private")
+
+    def create_repo(self, repo_id, repo_type=None, private=None):
+        self.calls.append(("create_repo", repo_id, repo_type, private))
+
+    def create_commit(self, repo_id, operations, commit_message, repo_type=None):
+        if self.fail_commit:
+            raise RuntimeError("503 Service Unavailable")
+        self.calls.append(("create_commit", repo_id, repo_type, commit_message))
+        self.files.update({op.path_in_repo: op.path_or_fileobj for op in operations})
+        return types.SimpleNamespace(commit_url=f"https://huggingface.co/datasets/{repo_id}/commit/abc")
+
+
+@pytest.fixture
+def hub(monkeypatch):
+    fake = FakeHub()
+    monkeypatch.setattr(dtn, "hub_api", lambda token: fake)
+    monkeypatch.setenv("HF_TOKEN", "tok")
+    return fake
+
+
+def test_question_status():
+    assert dtn.question_status(dict(received=16, pending=0)) == "scored"
+    assert dtn.question_status(dict(received=8, pending=8)) == "partial"
+    assert dtn.question_status(dict(received=0, pending=16)) == "pending"
+    assert dtn.question_status(dict(received=0, pending=0)) == "unscorable"
+
+
+def test_results_payload_keeps_the_panel_out_and_the_review_apart(db):
+    teams, questions = dtn.read_db(db)
+    accepted, cells, _ = dtn.build_cells(teams, questions)
+    q1 = [c for c in cells if c["question_id"] == "q1"]
+    pick = {c["qid"]: "ABCD"[c["order"].index(1)] for c in q1}  # the panel always picks distractor 1 on q1
+    logs = {m: {c["qid"]: _ok(c, pick[c["qid"]]) for c in q1} for m in ("qwen3-4b", "kimi-k2")}
+    logs["kimi-k2"].pop(q1[0]["qid"])  # one answer still missing
+    stats = dtn.score_questions(accepted, cells, logs)
+    checks = {"q3": {"flag": True, "verdict": "key not in source", "issues": ["Q1 is not the cited article"]}}
+    reasons = dtn.review_reasons(stats, checks)
+    rows = dtn.rank_teams(teams, accepted, stats, reasons=reasons)
+    p = dtn.results_payload("llaca-2026", "2026-10-03T13:20:00Z", "PROVISIONAL", rows, accepted, stats, reasons, checks)
+    assert (p["schema"], p["event"], p["status"], p["data_as_of"]) == (1, "llaca-2026", "provisional", "2026-10-03T13:20:00Z")
+    assert p["published_at"].endswith("Z") and p["dry_run"] is False and p["score_floor"] == 0.5
+    top = p["ranking"][0]
+    assert top == dict(rank=1, team_id=1, team="Equipo Uno", country="Chile", team_score=0.5, mean_accuracy=0.0,
+                       accepted=2, scored=1, earning=1, pending=2)  # fmt: skip
+    assert [r["team_id"] for r in p["ranking"]] == [1, 2, 3]
+    by_id = {q["id"]: q for q in p["questions"]}
+    assert set(by_id) == {"q1", "q2", "q3", "q7"}  # accepted questions only
+    assert by_id["q1"] == dict(id="q1", team_id=1, sequence=1, score=1.0, contribution=0.5, status="partial")
+    assert by_id["q2"]["score"] is None and by_id["q2"]["contribution"] == 0.0 and by_id["q2"]["status"] == "pending"
+    assert [(r["id"], r["reasons"], r["earning"]) for r in p["review"]] == [
+        ("q1", ["consensus"], True),
+        ("q3", ["source"], False),
+    ]
+    assert p["review"][1]["source_issues"] == ["Q1 is not the cited article"]
+    public = json.dumps({k: p[k] for k in ("ranking", "questions")})
+    assert not any(m in public for m in ("qwen", "kimi", "received", "consensus", "source"))  # nothing on the panel
+
+
+def test_results_repo_names():
+    assert dtn.results_repo("inria-chile/datathon-results") == "inria-chile/datathon-results"
+    assert dtn.results_repo("hf:inria-chile/datathon-results") == "inria-chile/datathon-results"
+    for bad in ("datathon-results", "a/b/c", "/b"):
+        with pytest.raises(pn.PanelError, match="expected <org>/<dataset>"):
+            dtn.results_repo(bad)
+
+
+def test_ensure_results_repo(hub):
+    assert dtn.ensure_results_repo("org/res", "tok") == "private" and hub.calls == [("repo_info", "org/res", "dataset")]
+    hub.repo, hub.calls = "missing", []
+    assert dtn.ensure_results_repo("org/res", "tok") == "created, private"
+    assert hub.calls[-1] == ("create_repo", "org/res", "dataset", True)
+    hub.repo = "public"
+    with pytest.raises(pn.PanelError, match="is public"):
+        dtn.ensure_results_repo("org/res", "tok")
+
+
+def test_publish_results_in_one_commit(hub):
+    payload = dict(event="llaca-2026", status="complete", data_as_of="2026-10-03T13:20:00Z", ranking=[])
+    url = dtn.publish_results("org/res", payload, "20261003T133000Z", "tok")
+    assert url.endswith("/commit/abc") and [c[0] for c in hub.calls] == ["create_commit"]
+    assert sorted(hub.files) == ["llaca-2026/history/results_20261003T133000Z.json", "llaca-2026/latest.json"]
+    assert {json.loads(b) == payload for b in hub.files.values()} == {True}
+    assert "complete results, data as of 2026-10-03T13:20:00Z" in hub.calls[0][3]
+
+
+def test_rank_publishes_to_the_results_dataset(db, tmp_path, hub, capsys):
+    out = tmp_path / "out"
+    dtn.main(["rank", "--db", str(db), "--results_dir", str(out), "--models", "qwen3-4b", "--publish", "hf:org/res"])
+    assert [c[0] for c in hub.calls] == ["repo_info", "create_commit"]  # checked before ranking, then one commit
+    latest = json.loads(hub.files["llaca-2026/latest.json"])
+    assert latest["status"] == "provisional" and {q["status"] for q in latest["questions"]} == {"pending"}
+    local = list((out / "llaca-2026" / "rankings").glob("results_*.json"))
+    assert len(local) == 1 and json.loads(local[0].read_text()) == latest
+    assert "[PASS] results dataset org/res: private" in capsys.readouterr().out
+
+
+def test_publish_guards(db, tmp_path, hub):
+    out = tmp_path / "out"
+    base = ["rank", "--db", str(db), "--results_dir", str(out), "--models", "qwen3-4b"]
+    hub.repo = "public"
+    with pytest.raises(SystemExit):  # refused before any work
+        dtn.main([*base, "--publish", "org/res"])
+    assert not (out / "llaca-2026").exists()
+    with pytest.raises(SystemExit):  # never into the app's backup dataset
+        dtn.main(["rank", "--db", "hf:org/db", "--results_dir", str(out), "--publish", "org/db"])
+    hub.repo, hub.fail_commit = "private", True
+    with pytest.raises(SystemExit):  # an upload failure is an error, but the results file stays for a re-publish
+        dtn.main([*base, "--publish", "org/res"])
+    assert len(list((out / "llaca-2026" / "rankings").glob("results_*.json"))) == 1
+
+
+def test_dry_run_writes_the_results_file_without_publishing(db, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(dtn, "hub_api", lambda token: pytest.fail("a dry run must not reach the Hub"))
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_API_KEY", raising=False)
+    out = tmp_path / "out"
+    base = ["--db", str(db), "--results_dir", str(out), "--dry_run", "--rate", "500", "--progress_s", "0.2"]
+    dtn.main(["run", *base, "--models", "qwen3-4b", "--publish", "org/res"])
+    assert "DRY RUN: not published to org/res" in capsys.readouterr().out
+    (path,) = (out / "llaca-2026" / "rankings").glob("results_*.json")
+    payload = json.loads(path.read_text())
+    assert payload["dry_run"] is True and payload["status"] == "complete"
+    assert {q["status"] for q in payload["questions"]} == {"scored"}

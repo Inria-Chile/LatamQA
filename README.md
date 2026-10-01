@@ -523,6 +523,40 @@ default 0.5 s) and a page cache under `sources/`. It is a triage tool: a source
 can mention the key without supporting it (a question about who led a campaign,
 sourced to one participant's biography), so the committee still decides.
 
+### Publishing the results for the datathon app
+
+With `--publish <org>/<dataset>`, `run`, `rank` and `verify` also upload the
+results to a private Hugging Face dataset, from which the datathon app imports
+them to show the teams:
+
+```bash
+uv run datathon run --db hf:inria-chile/db-datathon-test --publish inria-chile/datathon-results --yes
+```
+
+Each publication is one commit with `<event>/latest.json` (the file the app
+reads) and a dated copy under `<event>/history/`; the same file is saved locally
+as `rankings/results_<UTC time>.json`. The dataset is checked before any paid
+work: it is created private if it does not exist, and a public dataset (or the
+app's own backup dataset) is refused. If the upload fails, the command exits
+with an error and the local file stays: `datathon rank --publish ...`
+publishes again. With `--dry_run` nothing is uploaded.
+
+The file (`schema: 1`) is split by audience, following the spec (§6.1: teams see
+aggregate per-question scores only, never per-model answers; flags are
+invisible to them):
+
+| Key | Audience | Content |
+| :-- | :-- | :-- |
+| `published_at`, `data_as_of`, `status` | everyone | When the file was made, when the database it reflects was last written (the backup's commit time for `hf:`, the file time for a local database), and `complete` or `provisional`. Show `data_as_of` as the leaderboard's update time. |
+| `ranking` | public leaderboard | Per team: `rank`, `team_id`, `team`, `country`, `team_score`, `mean_accuracy`, and the counts `accepted`, `scored`, `earning`, `pending`. |
+| `questions` | each team, its own | Per accepted question: `id`, `team_id`, `sequence`, `score` (null until an answer is in), `contribution`, and `status`: `scored`, `partial` (answers still missing), `pending` (none yet) or `unscorable` (no complete language version). |
+| `review` | committee only | Questions with review reasons: `reasons`, `earning`, the consensus option and share, the unanswered rate, and the source check's verdict, issues and reader verdict. |
+
+No model names, and no answer counts that would reveal the panel's size, are
+included. Questions accepted after the snapshot are absent from the file. `rank`
+and `run` warn when the database was last written more than 30 minutes ago; the
+app's backup interval sets how fresh the published ranking can be.
+
 `--event` names the results folder (default `llaca-2026`); `--dry_run`,
 `--models`, `--swap`, `--rate`, `--cap`, `--max_leaks`, `--budget_usd` and
 `--bill_to` work as in `panel`. Each question costs 8 requests per model; a full

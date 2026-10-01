@@ -29,6 +29,10 @@ Usage:
   datathon run  --db hf:inria-chile/db-datathon-test --yes
   datathon run  --db path/to/datathon.db --dry_run
   datathon rank --db hf:inria-chile/db-datathon-test
+  datathon run  --db hf:inria-chile/db-datathon-test --publish inria-chile/datathon-results --yes
+
+With ``--publish``, run, rank and verify also upload the results file the datathon app imports (`results_payload`) to
+a private Hugging Face dataset.
 """
 
 import argparse
@@ -68,6 +72,11 @@ NO_ANSWER_FLAG = 0.30  # spec §6.2: questions with more unanswered replies than
 # A question where at least this share of the panel's answers picks the same wrong option is flagged for review: the
 # key may be wrong or ambiguous (a wrong key "fools" the panel and earns points, as the Sep 2026 test run showed).
 CONSENSUS_FLAG = 0.5
+# `--publish`: the results file the datathon app imports (see `results_payload`) and the age above which the database
+# snapshot is reported as stale (the app backs its database up to the Hub on a timer; the spec asks for 5 minutes)
+RESULTS_SCHEMA = 1
+RESULTS_FILE = "latest.json"
+STALE_DATA_MIN = 30
 
 
 # ---------------------------------------------------------------------------------------------------------- questions
@@ -103,11 +112,16 @@ def balanced_permutations(question_id: str) -> list[tuple[list[int], str]]:
     return orders
 
 
-def snapshot_db(source: str, dest_dir: Path) -> Path:
-    """Copy the app database into ``dest_dir/datathon_<UTC time>.db`` and return the copy.
+def iso_utc(t: dt.datetime) -> str:
+    return t.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def snapshot_db(source: str, dest_dir: Path) -> tuple[Path, str]:
+    """Copy the app database into ``dest_dir/datathon_<UTC time>.db``; return the copy and when its data was written.
 
     ``source`` is a local SQLite file or ``hf:<org>/<dataset>`` (the app's private backup repo, file ``datathon.db``).
-    The copy uses SQLite's backup API, so a live database in WAL mode is read consistently.
+    The copy uses SQLite's backup API, so a live database in WAL mode is read consistently. The data time is the
+    backup's commit time for a Hub source (the copy is of that very commit) and the file time for a local one.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"datathon_{unique_stamp(dest_dir, 'datathon_{}.db')}.db"
@@ -115,13 +129,28 @@ def snapshot_db(source: str, dest_dir: Path) -> Path:
         if source.startswith("hf:"):
             from huggingface_hub import hf_hub_download
 
+            token = pn.hf_token()
+            info = hub_api(token).get_paths_info(source[3:], [DB_FILE], expand=True, repo_type="dataset")
+            if not info or info[0].last_commit is None:
+                raise pn.PanelError(f"no {DB_FILE} in dataset {source[3:]}")
+            commit = info[0].last_commit
             path = hf_hub_download(
-                source[3:], DB_FILE, repo_type="dataset", local_dir=tmp, token=pn.hf_token(), force_download=True
+                source[3:],
+                DB_FILE,
+                repo_type="dataset",
+                revision=commit.oid,
+                local_dir=tmp,
+                token=token,
+                force_download=True,
             )
+            written = commit.date
         else:
             path = source
             if not Path(path).exists():
                 raise pn.PanelError(f"database not found: {path}")
+            wal = Path(f"{path}-wal")
+            mtime = max(Path(path).stat().st_mtime, wal.stat().st_mtime if wal.exists() else 0.0)
+            written = dt.datetime.fromtimestamp(mtime, dt.timezone.utc)
         src = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         dst = sqlite3.connect(dest)
         try:
@@ -129,7 +158,7 @@ def snapshot_db(source: str, dest_dir: Path) -> Path:
         finally:
             src.close()
             dst.close()
-    return dest
+    return dest, iso_utc(written)
 
 
 def read_db(path: Path) -> tuple[list[dict], list[dict]]:
@@ -273,6 +302,7 @@ def rank_teams(
         vector = sorted((s or 0.0 for s in scores), reverse=True)
         rows.append(
             dict(
+                team_id=t["id"],
                 team=t["name"],
                 country=t["country"],
                 team_score=sum(max(0.0, s - floor) for s in scored),
@@ -447,6 +477,152 @@ def write_outputs(
     return rank_dir / f"ranking_{stamp}.md"
 
 
+# ---------------------------------------------------------------------------------------------------------- publishing
+
+
+def hub_api(token: str):
+    from huggingface_hub import HfApi
+
+    return HfApi(token=token)
+
+
+def question_status(s: dict) -> str:
+    """``scored`` (every panel answer in), ``partial`` (some still missing), ``pending`` (none yet) or ``unscorable``
+    (neither language version is complete, so there is nothing to ask; it contributes 0)."""
+    if s["received"]:
+        return "partial" if s["pending"] else "scored"
+    return "pending" if s["pending"] else "unscorable"
+
+
+def results_payload(
+    event: str,
+    data_as_of: str | None,
+    status: str,
+    rows: list[dict],
+    accepted: list[dict],
+    stats: dict[str, dict],
+    reasons: dict[str, list[str]],
+    checks: dict[str, dict],
+    floor: float = SCORE_FLOOR,
+    dry_run: bool = False,
+) -> dict:
+    """The results file the datathon app imports (schema ``RESULTS_SCHEMA``), in three parts by audience (spec §6.1):
+
+    - ``ranking``, for the public leaderboard: every team's rank, score and question counts;
+    - ``questions``, for each team's own view: the score of each of its accepted questions, never per-model answers;
+    - ``review``, for the committee only: the questions with review reasons (`review_reasons`) and why.
+
+    ``data_as_of`` is when the database the ranking reflects was last written (`snapshot_db`): the time to show on a
+    provisional leaderboard. No model names or counts that reveal the panel are included (spec §6.1). Questions
+    accepted after the snapshot are absent: the app shows them as not evaluated yet.
+    """
+    by_id = {q["id"]: q for q in accepted}
+    return dict(
+        schema=RESULTS_SCHEMA,
+        event=event,
+        published_at=iso_utc(dt.datetime.now(dt.timezone.utc)),
+        data_as_of=data_as_of,
+        status=status.lower(),
+        dry_run=dry_run,
+        score_floor=floor,
+        ranking=[
+            dict(
+                rank=r["rank"],
+                team_id=r["team_id"],
+                team=r["team"],
+                country=r["country"],
+                team_score=round(r["team_score"], 6),
+                mean_accuracy=None if r["mean_accuracy"] is None else round(r["mean_accuracy"], 6),
+                accepted=r["accepted"],
+                scored=r["scored"],
+                earning=r["earning"],
+                pending=r["pending_questions"],
+            )
+            for r in rows
+        ],
+        questions=[
+            dict(
+                id=q["id"],
+                team_id=q["team_id"],
+                sequence=q["submission_sequence_number"],
+                score=None if stats[q["id"]]["score"] is None else round(stats[q["id"]]["score"], 6),
+                contribution=round(max(0.0, (stats[q["id"]]["score"] or 0.0) - floor), 6),
+                status=question_status(stats[q["id"]]),
+            )
+            for q in sorted(accepted, key=lambda q: (q["team_id"], q["submission_sequence_number"] or 0, q["id"]))
+        ],
+        review=[
+            dict(
+                id=qid,
+                team_id=by_id[qid]["team_id"],
+                reasons=reasons[qid],
+                earning=(stats[qid]["score"] or 0.0) > floor,
+                consensus_option=stats[qid]["consensus_option"],
+                consensus_share=stats[qid]["consensus_share"],
+                no_answer_rate=stats[qid]["no_answer_rate"],
+                source_verdict=checks.get(qid, {}).get("verdict", "not checked"),
+                source_issues=checks.get(qid, {}).get("issues", []),
+                reader_verdict=checks.get(qid, {}).get("reader_verdict"),
+            )
+            for qid in sorted(reasons, key=lambda qid: (by_id[qid]["team_id"], str(qid)))
+            if reasons[qid]
+        ],
+    )
+
+
+def results_repo(value: str) -> str:
+    """``<org>/<dataset>`` from a ``--publish`` value (an ``hf:`` prefix, as in ``--db``, is accepted)."""
+    repo = value.removeprefix("hf:")
+    if repo.count("/") != 1 or not all(repo.split("/")):
+        raise pn.PanelError(f"--publish {value}: expected <org>/<dataset>")
+    return repo
+
+
+def ensure_results_repo(repo: str, token: str) -> str:
+    """Make sure ``repo`` is a private dataset this token can reach, creating it (private) if it does not exist; return
+    what was found. A public repo is refused: the file holds every team's question scores and the committee's flags."""
+    from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
+
+    api = hub_api(token)
+    try:
+        info = api.repo_info(repo, repo_type="dataset")
+    except RepositoryNotFoundError:
+        try:
+            api.create_repo(repo, repo_type="dataset", private=True)
+        except HfHubHTTPError as e:
+            raise pn.PanelError(f"cannot create the results dataset {repo}: {e}") from e
+        return "created, private"
+    except HfHubHTTPError as e:
+        raise pn.PanelError(f"cannot reach the results dataset {repo}: {e}") from e
+    if not info.private:
+        raise pn.PanelError(
+            f"the results dataset {repo} is public; it would expose every team's question scores and the committee's "
+            "review flags. Make it private or publish elsewhere."
+        )
+    return "private"
+
+
+def publish_results(repo: str, payload: dict, stamp: str, token: str) -> str:
+    """Upload ``<event>/latest.json`` and ``<event>/history/results_<stamp>.json`` in one commit; return its URL.
+
+    The app polls ``latest.json``; one commit per publication means it never reads a half-updated file.
+    """
+    from huggingface_hub import CommitOperationAdd
+
+    data = json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8")
+    event = payload["event"]
+    commit = hub_api(token).create_commit(
+        repo,
+        [
+            CommitOperationAdd(f"{event}/{RESULTS_FILE}", data),
+            CommitOperationAdd(f"{event}/history/results_{stamp}.json", data),
+        ],
+        commit_message=f"datathon {event}: {payload['status']} results, data as of {payload['data_as_of']}",
+        repo_type="dataset",
+    )
+    return commit.commit_url
+
+
 # ---------------------------------------------------------------------------------------------------------- stages
 
 
@@ -458,7 +634,10 @@ def load_state(args, specs: list[dict]) -> tuple[list[dict], list[dict], list[di
     """Snapshot the database and build the current cells; write ``items.json`` for the panel workers."""
     out_dir = event_dir(args)
     out_dir.mkdir(parents=True, exist_ok=True)
-    snapshot = snapshot_db(args.db, out_dir / "snapshots")
+    snapshot, args.data_as_of = snapshot_db(args.db, out_dir / "snapshots")
+    age = dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(args.data_as_of)
+    if age > dt.timedelta(minutes=STALE_DATA_MIN):
+        logger.warning(f"the database was last written {age.total_seconds() / 60:.0f} min ago ({args.data_as_of})")
     teams, questions = read_db(snapshot)
     accepted, cells, problems = build_cells(teams, questions)
     for p in problems:
@@ -510,7 +689,25 @@ def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[di
     if args.dry_run:
         note += " DRY RUN: fake answers, not a real ranking."
     stamp = unique_stamp(out_dir / "rankings", "ranking_{}.md")
-    return write_outputs(rows, accepted, stats, out_dir, stamp, status, note, args.score_floor, reasons, checks)
+    path = write_outputs(rows, accepted, stats, out_dir, stamp, status, note, args.score_floor, reasons, checks)
+    if args.publish:
+        payload = results_payload(
+            args.event, args.data_as_of, status, rows, accepted, stats, reasons, checks, args.score_floor, args.dry_run
+        )
+        local = out_dir / "rankings" / f"results_{stamp}.json"
+        local.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        if args.dry_run:
+            print(f"DRY RUN: not published to {args.publish}; the results file is {local}")
+        else:
+            try:
+                url = publish_results(args.publish, payload, stamp, pn.hf_token())
+            except Exception as e:  # the ranking is saved: say how to publish it again rather than lose the run
+                raise pn.PanelError(
+                    f"publishing to {args.publish} failed ({e}); the results file is {local}. "
+                    f"Re-publish with `datathon rank --db {args.db} --publish {args.publish}`."
+                ) from e
+            print(f"published {args.event}/{RESULTS_FILE} to {args.publish} (data as of {args.data_as_of}): {url}")
+    return path
 
 
 def stage_run(args, panel: dict, specs: list[dict]) -> None:
@@ -668,6 +865,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--budget_usd", type=float, default=40.0, help="refuse to start if the cost estimate exceeds this")
     parser.add_argument("--progress_s", type=float, default=60.0, help="seconds between progress lines")
     parser.add_argument("--results_dir", default=str(DEFAULT_RESULTS_DIR), help="root folder for datathon results")
+    parser.add_argument(
+        "--publish",
+        metavar="ORG/DATASET",
+        help="also upload the results file the datathon app imports to this private HF dataset (created private if "
+        "missing; a public one is refused), as <event>/latest.json plus a dated copy",
+    )
     parser.add_argument("--reader", help="verify: panel model key that also reads each cited source (paid), e.g. qwen3.5-397b")
     parser.add_argument("--wiki_pause", type=float, default=0.5, help="verify: seconds between Wikipedia/Wikidata requests")
     parser.add_argument("--yes", action="store_true", help="confirm a paid run")
@@ -681,6 +884,12 @@ def main(argv: list[str] | None = None) -> None:
         panel = pn.load_panel(args.panel)
         specs = pn.select_models(panel, args.models, args.swap)
         args.panel_name = panel["name"]
+        if args.publish:  # before any paid work: a run whose results cannot be published should not start
+            args.publish = results_repo(args.publish)
+            if args.db and args.db.startswith("hf:") and results_repo(args.db) == args.publish:
+                raise pn.PanelError(f"--publish {args.publish} is the app's backup dataset (--db); use a separate one")
+            if not args.dry_run:
+                print(f"[PASS] results dataset {args.publish}: {ensure_results_repo(args.publish, pn.hf_token())}")
         if args.stage == "check":
             pn.stage_check(args, panel, specs, billing_check=not args.no_billing_check)
             return
