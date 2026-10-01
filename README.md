@@ -446,6 +446,50 @@ Results go to `results/panel/<panel>/<set_name>/run<N>/`:
 * `summary_<key>.json`, `report.md` and `report.json`: accuracy with a 95 % interval, coverage, leaks, latency, cost, and whether the run is publishable (every model answers at least 99.5 % of the questions, with no leak and no stop);
 * `items.json` and `run_meta.json`: the exact questions, option orders, request settings and models of the run.
 
+## `datathon`: score and rank the LLACA datathon teams
+
+`datathon` evaluates the questions the teams submitted to the
+[LLACA datathon app](https://github.com/Inria-Chile/llaca-datathon-app) with a
+model panel (default [`p6`](latamqa/panels/p6.yaml)) and ranks the teams with
+the rules of the datathon specification
+([`docs/datathon-platform-spec.md`](https://github.com/Inria-Chile/llaca-datathon-app/blob/main/docs/datathon-platform-spec.md),
+§6.2 and §7). It reads the app's SQLite database directly, either a local
+`datathon.db` or the app's private backup on the Hub (`hf:<org>/<dataset>`),
+and never writes to it.
+
+```bash
+uv run datathon check                                            # free: panel pre-run checks
+uv run datathon run  --db hf:inria-chile/db-datathon-test --yes  # evaluate what is missing, then rank
+uv run datathon rank --db hf:inria-chile/db-datathon-test        # free: re-rank, e.g. after committee exclusions
+```
+
+Every accepted question (submitted or evaluated; not excluded, withdrawn or a
+draft) is asked to every panel model in its local language and in English,
+under the app's four balanced option orders (the correct answer once at each
+of A-D, derived from a sha256 of the question id). The request spec is protocol
+v2 (see [`panel`](#panel-open-weight-panel-on-hugging-face-inference-providers)).
+
+| | Rule |
+| :-- | :-- |
+| Question score | `1 − correct ÷ received` over the (model, language, order) answers received. Errors are retried and never scored; an unparsable or reasoning reply counts as received and wrong. |
+| Team score | `Σ max(0, score − 0.5)` over the team's accepted questions (`--score_floor` changes the 0.5). |
+| Ties | Descending question-score vectors padded to 60, then the lower sum of submission sequence numbers, then the lowest sequence number. |
+| Mean panel accuracy | Mean of `correct ÷ received` over the team's scored questions. Shown for reference; it does not affect the order. |
+
+Runs are incremental: each `run` sends only the answers still missing (new
+questions, questions whose text was edited, earlier errors) and then re-ranks
+every team from a fresh snapshot of the database. Each run writes, under
+`results/datathon/<event>/`:
+
+* `rankings/ranking_<UTC time>.md` and `.csv`: the ranking (rank, team, country, team score, mean panel accuracy, accepted, scored and point-earning questions, questions still pending), also copied to `ranking_latest.md` / `.csv`. It is marked provisional while any answer is missing or a model has stopped;
+* `rankings/questions_<UTC time>.csv`: each accepted question's score, accuracy, contribution, answers received and unanswered rate (questions above 30 % are flagged for the committee, spec §6.2);
+* `snapshots/datathon_<UTC time>.db`: the database copy the run used, and the panel's per-model logs (`<model>.jsonl`).
+
+`--event` names the results folder (default `llaca-2026`); `--dry_run`,
+`--models`, `--swap`, `--rate`, `--cap`, `--max_leaks`, `--budget_usd` and
+`--bill_to` work as in `panel`. Each question costs 8 requests per model; a full
+field of 4,320 questions on P6 is about 242,000 requests (~45 min, ~$18).
+
 ## Leaderboard Management
 
 The `leaderboard` command-line tool manages and visualizes the leaderboard. Evaluation

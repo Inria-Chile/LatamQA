@@ -884,6 +884,14 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
         raise PanelError(f"estimate exceeds --budget_usd {args.budget_usd}")
     if not (args.yes or args.dry_run):
         raise PanelError("paid stage: re-run with --yes (or --dry_run to test offline)")
+    run_panel_processes(specs, len(items), out_dir, args, bill_to)
+    report(specs, items, out_dir, args.set_name, args.run, panel["name"], args.dry_run)
+
+
+def run_panel_processes(specs: list[dict], n_items: int, out_dir: Path, args, bill_to: str, max_leaks=None) -> None:
+    """Run every model on ``out_dir/items.json`` in parallel (one process each), print progress until all finish,
+    and record the billing usage before and after. ``max_leaks`` (an int, or a dict by model key) overrides
+    ``args.max_leaks``."""
     check_environment(args.dry_run)
     (out_dir / "STOP").unlink(missing_ok=True)
     caps = dict(kv.split("=") for kv in args.cap or [])
@@ -892,6 +900,7 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
     procs = {}
     for s in specs:
         cap = int(caps.get(s["key"], s["max_in_flight"]))
+        leaks = args.max_leaks if max_leaks is None else max_leaks
         procs[s["key"]] = ctx.Process(
             target=run_model,
             args=(
@@ -902,7 +911,7 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
                 cap,
                 bill_to,
                 args.dry_run,
-                args.max_leaks,
+                leaks[s["key"]] if isinstance(leaks, dict) else leaks,
                 args.max_error_rate,
                 args.retry_rounds,
             ),
@@ -915,9 +924,9 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
         for s in specs:
             recs = latest_records(out_dir / f"{s['key']}.jsonl")
             ok = sum(r["status"] == 200 for r in recs.values())
-            leaks = sum(is_leak(r) for r in recs.values())
+            leaks_now = sum(is_leak(r) for r in recs.values())
             aborted = " ABORTED" if (out_dir / f"{s['key']}.ABORT").exists() else ""
-            parts.append(f"{s['key']} {ok}/{len(items)} err {len(recs) - ok} leak {leaks}{aborted}")
+            parts.append(f"{s['key']} {ok}/{n_items} err {len(recs) - ok} leak {leaks_now}{aborted}")
         print(f"[{(time.time() - t0) / 60:5.1f} min] " + " | ".join(parts), flush=True)
     for p in procs.values():
         p.join()
@@ -925,7 +934,6 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
     (out_dir / f"billing_{stamp}.json").write_text(
         json.dumps({"before": snap0, "after": usage_snapshot(bill_to, args.dry_run)}, indent=1)
     )
-    report(specs, items, out_dir, args.set_name, args.run, panel["name"], args.dry_run)
 
 
 def stage_report(args, panel: dict, specs: list[dict]) -> None:
