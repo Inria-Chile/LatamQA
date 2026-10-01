@@ -474,3 +474,32 @@ def test_lenient_leak_rule_lets_refusals_through(tmp_path, monkeypatch, p6, no_s
     (tmp_path / "x").mkdir()
     _run_worker(tmp_path / "x", monkeypatch, spec, fake, n=40, cap=1, strict_leaks=False)
     assert "reasoning leaks" in (tmp_path / "x" / f"{spec['key']}.ABORT").read_text() and len(fake.calls) < 40
+
+
+def test_usage_snapshot_never_stops_a_run(monkeypatch):
+    import httpx
+
+    def flaky(url, token=None, timeout=30):
+        if "/settings/" in url:
+            raise httpx.ConnectError("connection reset")
+        return 200, {"usage": {}}  # a changed response shape
+
+    monkeypatch.setattr(pn, "_http_json", flaky)
+    monkeypatch.setenv("HF_TOKEN", "tok")
+    snap = pn.usage_snapshot("inria-chile")
+    assert snap["personal"]["error"].startswith("ConnectError") and snap["org"]["error"].startswith("KeyError")
+
+
+@pytest.mark.parametrize("strict, shown", [(True, "leak 1"), (False, "leak 0")])
+def test_progress_counts_leaks_like_the_stop_rule(tmp_path, monkeypatch, p6, capsys, strict, shown):
+    spec = next(m for m in p6["models"] if m["key"] == "qwen3-4b")
+    refusal = dict(qid="q1", status=200, content="I'm not able to see the question. Can", finish="length")
+    (tmp_path / "qwen3-4b.jsonl").write_text(json.dumps(dict(refusal, completion_tokens=16)) + "\n")
+    alive = iter([True])
+    process = types.SimpleNamespace(start=lambda: None, is_alive=lambda: next(alive, False), join=lambda: None)
+    monkeypatch.setattr(
+        pn, "mp", types.SimpleNamespace(get_context=lambda m: types.SimpleNamespace(Process=lambda **kw: process))
+    )
+    args = dict(dry_run=True, cap=None, rate=1.0, max_leaks=3, max_error_rate=0.01, retry_rounds=2, progress_s=0)
+    pn.run_panel_processes([spec], 10, tmp_path, types.SimpleNamespace(**args), "org", strict_leaks=strict)
+    assert f"qwen3-4b 1/10 err 0 {shown}" in capsys.readouterr().out

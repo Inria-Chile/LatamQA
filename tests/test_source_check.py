@@ -249,3 +249,24 @@ def test_check_all_is_incremental_and_follows_edits(tmp_path, wiki, web):
     assert new == 2 and len(llm.calls) == 1  # only the readable source is sent to the reader
     assert checks["a"]["reader_verdict"] == "reader: source does not say" and checks["a"]["flag"]
     assert sc.check_all(qs, tmp_path, wiki, reader=READER, litellm=llm)[1] == 0
+
+
+def test_a_source_that_cannot_be_fetched_is_retried_not_flagged(tmp_path, wiki, web):
+    ayala = "https://es.wikipedia.org/wiki/Plan_de_Ayala"
+    qs = [question("a", sources=ayala), question("b", answer="Río Colorado", sources="Q270627")]
+    web.fail |= {ayala, "https://www.wikidata.org/wiki/Special:EntityData/Q270627.json"}  # Wikimedia throttling
+    checks, new = sc.check_all(qs, tmp_path, wiki)
+    assert new == 2 and checks == {}  # saved, but not current: no flag reaches the ranking
+    saved = json.loads((tmp_path / sc.CHECKS_FILE).read_text())
+    assert saved["a"]["retry"] and saved["a"]["issues"][0].startswith("could not fetch es:Plan")
+    assert saved["b"]["retry"] and saved["b"]["issues"] == ["could not fetch Wikidata Q270627"]
+    web.fail.clear()
+    checks, new = sc.check_all(qs, tmp_path, wiki)
+    assert new == 2 and {c["verdict"] for c in checks.values()} == {"key in source"}
+    assert not any(c.get("retry") for c in checks.values()) and sc.check_all(qs, tmp_path, wiki)[1] == 0
+
+
+def test_a_failed_article_behind_a_wikidata_id_is_retried(tmp_path, wiki, web):
+    web.fail.add("https://es.wikipedia.org/wiki/R%C3%ADo_Colorado_(Argentina)")
+    r = sc.check_question(question(answer="Río Colorado", sources="Q270627"), wiki)
+    assert r["retry"] and r["issues"] == ["could not fetch es:Río Colorado (Argentina)"]  # not "has no article"

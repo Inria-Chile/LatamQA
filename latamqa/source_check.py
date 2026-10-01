@@ -320,7 +320,8 @@ def _options(question: dict, lang: str) -> list[str]:
 
 
 def check_question(question: dict, wiki: Wiki) -> dict:
-    """Text check of one question against its cited sources (no model involved)."""
+    """Text check of one question against its cited sources (no model involved). A source that could not be fetched
+    (Wikimedia throttling or down) sets ``retry``: the check is saved but not used, and the next `check_all` redoes it."""
     qids, links = parse_sources(question.get("wikidata_qids"))
     result: dict[str, Any] = dict(sources=question.get("wikidata_qids") or "", articles=[], issues=[])
     if not qids and not links:
@@ -330,6 +331,7 @@ def check_question(question: dict, wiki: Wiki) -> dict:
         a = wiki.article(lang, title)
         if a is None:
             result["issues"].append(f"could not fetch {lang}:{title}")
+            result["retry"] = True
         elif a.get("missing"):
             result["issues"].append(f"cited article {lang}:{title} does not exist")
         elif a.get("disambiguation"):
@@ -341,6 +343,7 @@ def check_question(question: dict, wiki: Wiki) -> dict:
         e = wiki.entity(qid)
         if e is None:
             result["issues"].append(f"could not fetch Wikidata {qid}")
+            result["retry"] = True
             continue
         if e.get("missing"):
             result["issues"].append(f"Wikidata {qid} does not exist")
@@ -351,8 +354,14 @@ def check_question(question: dict, wiki: Wiki) -> dict:
         elif not articles:
             for lang in (question_language(question), "en"):
                 title = e["sitelinks"].get(f"{lang}wiki")
-                a = wiki.article(lang, title) if title else None
-                if a and not a.get("missing") and not a.get("disambiguation"):
+                if not title:
+                    continue
+                a = wiki.article(lang, title)
+                if a is None:
+                    result["issues"].append(f"could not fetch {lang}:{title}")
+                    result["retry"] = True
+                    break
+                if not a.get("missing") and not a.get("disambiguation"):
                     articles.append(a)
                     break
             else:
@@ -468,13 +477,14 @@ def reader_verdict(letter: str | None, order: list[int], question: dict) -> tupl
 
 
 def load_checks(out_dir: Path, accepted: list[dict]) -> dict[str, dict]:
-    """Saved checks that still match the questions' current content, by question id."""
+    """Saved checks that still match the questions' current content, by question id. Checks whose sources could not
+    all be fetched (``retry``) are left out: a temporary failure must not flag a question."""
     path = Path(out_dir) / CHECKS_FILE
     if not path.exists():
         return {}
     saved = json.loads(path.read_text(encoding="utf-8"))
     current = {q["id"]: content_hash(q) for q in accepted}
-    return {qid: r for qid, r in saved.items() if current.get(qid) == r.get("hash")}
+    return {qid: r for qid, r in saved.items() if current.get(qid) == r.get("hash") and not r.get("retry")}
 
 
 def check_all(
@@ -522,6 +532,9 @@ def check_all(
             list(pool.map(read, readable))
     for r in results.values():
         r.pop("_articles", None)
+    retry = sum(bool(r.get("retry")) for r in results.values())
+    if retry:
+        logger.warning(f"source check: {retry} question(s) with a source that could not be fetched; verify retries them")
     saved.update(results)
     path.write_text(json.dumps(saved, indent=1, ensure_ascii=False), encoding="utf-8")
     return load_checks(out_dir, accepted), len(results)

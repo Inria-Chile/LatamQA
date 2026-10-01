@@ -516,7 +516,9 @@ question's language, else English) and the Wikidata items, then reports:
 
 Flagged checks are listed in the terminal and every check is saved to
 `rankings/sources_<UTC time>.csv` and `source_checks.json`; `verify` then
-re-ranks, and later `run` and `rank` keep using the saved checks. The source
+re-ranks, and later `run` and `rank` keep using the saved checks. A question
+whose source could not be fetched (Wikimedia throttling or down) is not flagged:
+the next `verify` checks it again. The source
 check reads the rendered article pages and Wikidata entity files (Wikimedia's
 API throttles shared addresses), with a pause between requests (`--wiki_pause`,
 default 0.5 s) and a page cache under `sources/`. It is a triage tool: a source

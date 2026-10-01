@@ -821,18 +821,24 @@ def _http_json(url: str, token: str | None = None, timeout: float = 30):
 
 
 def usage_snapshot(bill_to: str, dry_run: bool = False) -> dict:
-    """Today's Inference Providers usage for the personal account and the billing org (free GETs)."""
+    """Today's Inference Providers usage for the personal account and the billing org (free GETs).
+
+    For the record only: the endpoint is undocumented, so a failure or a changed response is noted in the snapshot and
+    never stops a run (a run whose ranking was not written because of it would be lost work)."""
     if dry_run:
         return {"ts": _now(), "personal": {"n": 0, "usd": 0.0}, "org": {"n": 0, "usd": 0.0}}
     token, day0 = hf_token(), int(time.time()) // 86400 * 86400
     snap: dict[str, Any] = {"ts": _now()}
     for label, scope in (("personal", "settings"), ("org", f"organizations/{bill_to}")):
-        code, body = _http_json(f"{HUB}/api/{scope}/billing/usage-v2?startDate={day0}&endDate={int(time.time())}", token)
-        if code != 200:
-            snap[label] = {"error": code}
-            continue
-        ip = body["usage"]["inferenceProviders"]
-        snap[label] = {"n": ip["numRequests"], "usd": ip["usedNanoUsd"] / 1e9}
+        try:
+            code, body = _http_json(f"{HUB}/api/{scope}/billing/usage-v2?startDate={day0}&endDate={int(time.time())}", token)
+            if code != 200:
+                snap[label] = {"error": code}
+                continue
+            ip = body["usage"]["inferenceProviders"]
+            snap[label] = {"n": ip["numRequests"], "usd": ip["usedNanoUsd"] / 1e9}
+        except Exception as e:
+            snap[label] = {"error": f"{type(e).__name__}: {e}"[:200]}
     return snap
 
 
@@ -939,6 +945,7 @@ def run_panel_processes(
             return None
 
     earlier = {s["key"]: abort_stamp(s["key"]) for s in specs}  # a worker removes or rewrites these when it ends
+    leak = is_leak if strict_leaks else is_reasoning_leak  # count what the workers' stop rule counts
     snap0 = usage_snapshot(bill_to, args.dry_run)
     ctx = mp.get_context("spawn")
     procs = {}
@@ -970,7 +977,7 @@ def run_panel_processes(
         for s in specs:
             recs = latest_records(out_dir / f"{s['key']}.jsonl")
             ok = sum(r["status"] == 200 for r in recs.values())
-            leaks_now = sum(is_leak(r) for r in recs.values())
+            leaks_now = sum(leak(r) for r in recs.values())
             aborted = " ABORTED" if abort_stamp(s["key"]) not in (None, earlier[s["key"]]) else ""
             parts.append(f"{s['key']} {ok}/{n_items} err {len(recs) - ok} leak {leaks_now}{aborted}")
         print(f"[{(time.time() - t0) / 60:5.1f} min] " + " | ".join(parts), flush=True)

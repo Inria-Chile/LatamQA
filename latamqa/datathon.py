@@ -23,6 +23,7 @@ Stages:
   check   free   panel pre-run checks (token, billing org, routes, gated access)
   run     paid   evaluate what is missing, then rank
   rank    free   re-rank from the logs and a fresh database snapshot (e.g. after committee exclusions)
+  verify  free   check new or edited answer keys against their cited Wikipedia/Wikidata sources (paid with --reader)
 
 Usage:
   datathon check
