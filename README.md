@@ -471,6 +471,7 @@ and never writes to it.
 uv run datathon check                                            # free: panel pre-run checks
 uv run datathon run  --db hf:inria-chile/db-datathon-test --yes  # evaluate what is missing, then rank
 uv run datathon rank --db hf:inria-chile/db-datathon-test        # free: re-rank, e.g. after committee exclusions
+uv run datathon verify --db hf:inria-chile/db-datathon-test      # free: check answer keys against the cited sources
 ```
 
 Every accepted question (submitted or evaluated; not excluded, withdrawn or a
@@ -494,9 +495,76 @@ of teams fully evaluated (every cell answered by every model). Each run then
 shows the ranking in the terminal as a table (rendered with `rich`) and writes,
 under `results/datathon/<event>/`:
 
-* `rankings/ranking_<UTC time>.md` and `.csv`: the ranking (rank, team, country, team score, mean panel accuracy, accepted, scored and point-earning questions, questions still pending), also copied to `ranking_latest.md` / `.csv`. It is marked provisional while any answer is missing or a model has stopped;
-* `rankings/questions_<UTC time>.csv`: each accepted question's score, accuracy, contribution, answers received and unanswered rate (questions above 30 % are flagged for the committee, spec §6.2);
+* `rankings/ranking_<UTC time>.md` and `.csv`: the ranking (rank, team, country, team score, mean panel accuracy, accepted, scored and point-earning questions, questions still pending, and **review**: point-earning questions flagged for the committee), also copied to `ranking_latest.md` / `.csv`. It is marked provisional while any answer is missing or a model has stopped;
+* `rankings/questions_<UTC time>.csv`: each accepted question's score, accuracy, contribution, answers received, unanswered rate, the wrong option the panel picked most and its share, the source-check verdict, and its review reasons;
 * `snapshots/datathon_<UTC time>.db`: the database copy the run used, and the panel's per-model logs (`<model>.jsonl`).
+
+### Review flags and the source check
+
+The panel measures difficulty, not validity: a question whose answer key is
+wrong or ambiguous fools the panel and earns points. In a test run, three of the
+four point-earning questions were of that kind. Each question therefore gets
+review reasons. They never change a score (presumption of validity, spec §3.1);
+they tell the committee which point-earning questions to check before results
+are final.
+
+| Reason | When |
+| :-- | :-- |
+| `consensus` | At least half of the panel's answers (`--consensus_flag`, default 0.5) pick the same wrong option, across languages and option orders: the key may be wrong, or two options may both be right. |
+| `unanswered` | More than 30 % of the replies have no answer letter (spec §6.2). |
+| `source` | The cited source does not back the key (`datathon verify`, below). |
+
+`datathon verify` checks every new or edited question against the source it
+cites in the app (`wikidata_qids`: Wikidata ids and/or Wikipedia links). It reads
+the cited Wikipedia articles (a bare Wikidata id through its article in the
+question's language, else English) and the Wikidata items, then reports:
+
+* ids and links that disagree: a cited Wikidata id that is not the item of the cited article, an id that does not exist, a link to a missing or disambiguation page;
+* where the key stands in the article: `key in source`, `key words in source` (all its words, not the exact phrase), `distractor in source, key not`, `key not in source`, or `no source` (only a provenance note, which the spec allows);
+* with `--reader <model key>` (any panel model, e.g. `qwen3.5-397b`; paid, about one request per sourced question), which option the article supports according to that model: `reader agrees`, `reader picks another option`, or `reader: source does not say`.
+
+Flagged checks are listed in the terminal and every check is saved to
+`rankings/sources_<UTC time>.csv` and `source_checks.json`; `verify` then
+re-ranks, and later `run` and `rank` keep using the saved checks. The source
+check reads the rendered article pages and Wikidata entity files (Wikimedia's
+API throttles shared addresses), with a pause between requests (`--wiki_pause`,
+default 0.5 s) and a page cache under `sources/`. It is a triage tool: a source
+can mention the key without supporting it (a question about who led a campaign,
+sourced to one participant's biography), so the committee still decides.
+
+### Publishing the results for the datathon app
+
+With `--publish <org>/<dataset>`, `run`, `rank` and `verify` also upload the
+results to a private Hugging Face dataset, from which the datathon app imports
+them to show the teams:
+
+```bash
+uv run datathon run --db hf:inria-chile/db-datathon-test --publish inria-chile/datathon-results --yes
+```
+
+Each publication is one commit with `<event>/latest.json` (the file the app
+reads) and a dated copy under `<event>/history/`; the same file is saved locally
+as `rankings/results_<UTC time>.json`. The dataset is checked before any paid
+work: it is created private if it does not exist, and a public dataset (or the
+app's own backup dataset) is refused. If the upload fails, the command exits
+with an error and the local file stays: `datathon rank --publish ...`
+publishes again. With `--dry_run` nothing is uploaded.
+
+The file (`schema: 1`) is split by audience, following the spec (§6.1: teams see
+aggregate per-question scores only, never per-model answers; flags are
+invisible to them):
+
+| Key | Audience | Content |
+| :-- | :-- | :-- |
+| `published_at`, `data_as_of`, `status` | everyone | When the file was made, when the database it reflects was last written (the backup's commit time for `hf:`, the file time for a local database), and `complete` or `provisional`. Show `data_as_of` as the leaderboard's update time. |
+| `ranking` | public leaderboard | Per team: `rank`, `team_id`, `team`, `country`, `team_score`, `mean_accuracy`, and the counts `accepted`, `scored`, `earning`, `pending`. |
+| `questions` | each team, its own | Per accepted question: `id`, `team_id`, `sequence`, `score` (null until an answer is in), `contribution`, and `status`: `scored`, `partial` (answers still missing), `pending` (none yet) or `unscorable` (no complete language version). |
+| `review` | committee only | Questions with review reasons: `reasons`, `earning`, the consensus option and share, the unanswered rate, and the source check's verdict, issues and reader verdict. |
+
+No model names, and no answer counts that would reveal the panel's size, are
+included. Questions accepted after the snapshot are absent from the file. `rank`
+and `run` warn when the database was last written more than 30 minutes ago; the
+app's backup interval sets how fresh the published ranking can be.
 
 `--event` names the results folder (default `llaca-2026`); `--dry_run`,
 `--models`, `--swap`, `--rate`, `--cap`, `--max_leaks`, `--budget_usd` and
