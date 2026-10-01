@@ -265,10 +265,72 @@ def _pct(x: float | None) -> str:
     return "—" if x is None else f"{100 * x:.1f}%"
 
 
+def footnote(floor: float = SCORE_FLOOR) -> str:
+    return (
+        f"Team score = sum over accepted questions of max(0, score - {floor}), with score = 1 - panel accuracy on the "
+        "question. Mean panel accuracy is shown for reference only. Scored = questions with at least one panel answer; "
+        "earning points = score above the floor; pending = questions still missing answers."
+    )
+
+
+def render_ranking(rows: list[dict], stamp: str, status: str, note: str, floor: float = SCORE_FLOOR):
+    """The ranking as a `rich` table for the terminal: the podium in bold, teams without points dimmed, pending counts
+    in yellow, and the run status in the title."""
+    from rich import box
+    from rich.table import Table
+    from rich.text import Text
+
+    title = Text.assemble(
+        ("Datathon ranking", "bold"),
+        f" · {stamp} · ",
+        (status, "bold green" if status == "complete" else "bold yellow"),
+    )
+    table = Table(
+        title=title,
+        caption=f"{note}\n{footnote(floor)}",
+        caption_justify="left",
+        caption_style="dim",
+        box=box.ROUNDED,
+        header_style="bold",
+        expand=False,
+    )
+    table.add_column("#", justify="right")
+    table.add_column("Team")
+    table.add_column("Country")
+    table.add_column("Team score", justify="right", style="bold cyan")
+    table.add_column("Mean panel accuracy", justify="right")
+    for name in ("Accepted", "Scored", "Earning points", "Pending"):
+        table.add_column(name, justify="right")
+    for r in rows:
+        style = "bold" if r["rank"] <= 3 and r["team_score"] > 0 else "dim" if r["team_score"] == 0 else None
+        pending = Text(str(r["pending_questions"]), style="yellow" if r["pending_questions"] else "")
+        table.add_row(
+            str(r["rank"]),
+            str(r["team"]),
+            str(r["country"] or "—"),
+            f"{r['team_score']:.4f}",
+            _pct(r["mean_accuracy"]),
+            str(r["accepted"]),
+            str(r["scored"]),
+            str(r["earning"]),
+            pending,
+            style=style,
+        )
+    return table
+
+
 def write_outputs(
-    rows: list[dict], accepted: list[dict], stats: dict[str, dict], out_dir: Path, stamp: str, status: str, note: str
+    rows: list[dict],
+    accepted: list[dict],
+    stats: dict[str, dict],
+    out_dir: Path,
+    stamp: str,
+    status: str,
+    note: str,
+    floor: float = SCORE_FLOOR,
 ) -> Path:
-    """Write the ranking (Markdown + CSV) and the per-question scores for this run, and refresh ``ranking_latest``."""
+    """Write the ranking (Markdown + CSV) and the per-question scores for this run, refresh ``ranking_latest``, and
+    show the ranking in the terminal."""
     rank_dir = out_dir / "rankings"
     rank_dir.mkdir(parents=True, exist_ok=True)
     columns = ["rank", "team", "country", "team_score", "mean_accuracy", "accepted", "scored", "earning"]
@@ -291,12 +353,7 @@ def write_outputs(
         f"{r['accepted']} | {r['scored']} | {r['earning']} | {r['pending_questions']} |"
         for r in rows
     ]
-    lines += [
-        "",
-        f"Team score = sum over accepted questions of max(0, score - {SCORE_FLOOR}), with score = 1 - panel accuracy on the "
-        "question. Mean panel accuracy is shown for reference only. Scored = questions with at least one panel answer; "
-        "earning points = score above the floor; pending = questions still missing answers.",
-    ]
+    lines += ["", footnote(floor)]
     md = "\n".join(lines) + "\n"
     (rank_dir / f"ranking_{stamp}.md").write_text(md, encoding="utf-8")
     shutil.copyfile(rank_dir / f"ranking_{stamp}.md", out_dir / "ranking_latest.md")
@@ -317,7 +374,7 @@ def write_outputs(
                     state=q["state"],
                     score=s["score"],
                     accuracy=s["accuracy"],
-                    contribution=max(0.0, s["score"] - SCORE_FLOOR) if s["score"] is not None else 0.0,
+                    contribution=max(0.0, s["score"] - floor) if s["score"] is not None else 0.0,
                     received=s["received"],
                     correct=s["correct"],
                     pending=s["pending"],
@@ -325,8 +382,11 @@ def write_outputs(
                     flag_no_answer=(s["no_answer_rate"] or 0) > NO_ANSWER_FLAG,
                 )
             )
-    print(md)
-    print(f"-> {rank_dir / f'ranking_{stamp}.md'}")
+    from rich.console import Console
+
+    console = Console()
+    console.print(render_ranking(rows, stamp, status, note, floor))
+    console.print(f"-> {rank_dir / f'ranking_{stamp}.md'}", highlight=False, soft_wrap=True)
     return rank_dir / f"ranking_{stamp}.md"
 
 
@@ -370,7 +430,7 @@ def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[di
     if args.dry_run:
         note += " DRY RUN: fake answers, not a real ranking."
     stamp = unique_stamp(out_dir / "rankings", "ranking_{}.md")
-    return write_outputs(rows, accepted, stats, out_dir, stamp, status, note)
+    return write_outputs(rows, accepted, stats, out_dir, stamp, status, note, args.score_floor)
 
 
 def stage_run(args, panel: dict, specs: list[dict]) -> None:

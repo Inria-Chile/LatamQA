@@ -191,6 +191,25 @@ def test_rank_teams_tie_breaks():
     assert rows[-1]["team"] == "T0" and rows[-1]["accepted"] == 0  # no questions: last among equal scores
 
 
+def test_render_ranking():
+    import io
+
+    from rich.console import Console
+
+    rows = [
+        dict(rank=1, team="T | One", country="CL", team_score=1.25, mean_accuracy=0.2, accepted=3, scored=3, earning=3,
+             pending_questions=0),
+        dict(rank=2, team="T2", country=None, team_score=0.0, mean_accuracy=None, accepted=0, scored=0, earning=0,
+             pending_questions=2),
+    ]  # fmt: skip
+    console = Console(file=io.StringIO(), record=True, width=160)
+    console.print(dtn.render_ranking(rows, "20261003T120000Z", "PROVISIONAL", "a note", floor=0.4))
+    text = console.export_text()
+    assert "Datathon ranking · 20261003T120000Z · PROVISIONAL" in text
+    assert "T | One" in text and "1.2500" in text and "20.0%" in text and "—" in text
+    assert "a note" in text and "max(0, score - 0.4)" in text
+
+
 def test_write_outputs(tmp_path, db):
     teams, questions = dtn.read_db(db)
     accepted, cells, _ = dtn.build_cells(teams, questions)
@@ -202,6 +221,7 @@ def test_write_outputs(tmp_path, db):
     assert (tmp_path / "ranking_latest.md").read_text() == md
     assert (tmp_path / "ranking_latest.csv").read_text().startswith("rank,team,country,team_score,mean_accuracy")
     assert (tmp_path / "rankings" / "questions_20261003T120000Z.csv").exists()
+    assert "max(0, score - 0.5)" in md
 
 
 # ---------------------------------------------------------------------------------------------------------- end to end

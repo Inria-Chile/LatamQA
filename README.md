@@ -478,7 +478,8 @@ v2 (see [`panel`](#panel-open-weight-panel-on-hugging-face-inference-providers))
 
 Runs are incremental: each `run` sends only the answers still missing (new
 questions, questions whose text was edited, earlier errors) and then re-ranks
-every team from a fresh snapshot of the database. Each run writes, under
+every team from a fresh snapshot of the database. Each run shows the ranking in
+the terminal as a table (rendered with `rich`) and writes, under
 `results/datathon/<event>/`:
 
 * `rankings/ranking_<UTC time>.md` and `.csv`: the ranking (rank, team, country, team score, mean panel accuracy, accepted, scored and point-earning questions, questions still pending), also copied to `ranking_latest.md` / `.csv`. It is marked provisional while any answer is missing or a model has stopped;
