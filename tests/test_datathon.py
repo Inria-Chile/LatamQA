@@ -1,8 +1,10 @@
 """Tests for the datathon evaluator (`latamqa.datathon`): the app's option orders, reading the app database, the spec's
 scoring and tie-breaks, the ranking files, and an offline end-to-end run. No network access is needed."""
 
+import inspect
 import json
 import sqlite3
+import types
 
 import pytest
 
@@ -247,6 +249,65 @@ def test_datathon_dry_run_end_to_end(db, tmp_path, monkeypatch):
     assert sum(1 for _ in open(event / "kimi-k2.jsonl")) == n_lines
     dtn.main(["rank", *base])
     assert len(list((event / "rankings").glob("ranking_*.md"))) == 3
+
+
+def test_no_billing_check_reaches_the_panel_workers(db, tmp_path, monkeypatch):
+    spawned = []
+
+    def process(target, args=(), kwargs=None):  # records each worker's run_model arguments instead of spawning it
+        bound = inspect.signature(target).bind(*args, **(kwargs or {}))
+        bound.apply_defaults()
+        spawned.append(bound.arguments)
+        return types.SimpleNamespace(start=lambda: None, is_alive=lambda: False, join=lambda: None)
+
+    monkeypatch.setattr(pn, "mp", types.SimpleNamespace(get_context=lambda method: types.SimpleNamespace(Process=process)))
+    base = ["run", "--db", str(db), "--results_dir", str(tmp_path / "out"), "--dry_run", "--models", "qwen3-4b,kimi-k2"]
+    dtn.main(base)
+    dtn.main([*base, "--no_billing_check"])
+    assert [(a["billing_stop"], a["strict_leaks"]) for a in spawned] == [(True, False)] * 2 + [(False, False)] * 2
+
+
+def test_ranking_counts_answers_refused_for_billing(db, tmp_path):
+    base = ["rank", "--db", str(db), "--results_dir", str(tmp_path / "out"), "--models", "qwen3-4b"]
+    dtn.main(base)
+    event = tmp_path / "out" / "llaca-2026"
+    cells = json.loads((event / "items.json").read_text())
+    limit = 'HuggingfaceException - {"error":"You have exceeded your monthly spending limit for Inference Providers."}'
+    recs = [
+        dict(qid=cells[0]["qid"], status=403, error_msg=limit),
+        dict(qid=cells[1]["qid"], status=402, error_msg="Payment Required"),
+        dict(qid=cells[2]["qid"], status=503, error_msg="busy"),  # an ordinary error
+        dict(qid=cells[3]["qid"], status=402, error_msg="Payment Required"),
+        _ok(cells[3], cells[3]["correct"]),  # answered later: not refused any more
+    ]
+    (event / "qwen3-4b.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+    dtn.main(base)
+    assert "2 answer(s) refused for billing" in (event / "ranking_latest.md").read_text()
+
+
+def test_check_without_billing_check_only_reports_the_billing_org(monkeypatch, capsys):
+    import importlib.metadata
+
+    def fake_http_json(url, token=None, timeout=30):
+        if url.endswith("/api/whoami-v2"):
+            return 200, {"name": "someone", "orgs": [{"name": "inria-chile", "canPay": False}]}
+        return 200, {"inferenceProviderMapping": {"nscale": {"status": "live", "providerId": "x"}}, "gated": False}
+
+    monkeypatch.setattr(pn, "_http_json", fake_http_json)
+    monkeypatch.setattr(pn, "TESTED_LITELLM", importlib.metadata.version("litellm"))
+    monkeypatch.setenv("HF_TOKEN", "tok")
+    for var in ("HF_API_BASE", "HUGGINGFACE_API_BASE"):
+        monkeypatch.delenv(var, raising=False)
+    base = ["check", "--models", "qwen3-4b"]
+    with pytest.raises(SystemExit):
+        dtn.main(base)
+    assert "[FAIL] org inria-chile can pay" in capsys.readouterr().out
+    dtn.main([*base, "--no_billing_check"])
+    out = capsys.readouterr().out
+    assert "[INFO] org inria-chile can pay: member=True canPay=False" in out and "All checks passed." in out
+    with pytest.raises(SystemExit):  # a mistyped org still fails
+        dtn.main([*base, "--no_billing_check", "--bill_to", "inria-chlie"])
+    assert "[FAIL] org inria-chlie can pay: member=False" in capsys.readouterr().out
 
 
 def test_datathon_needs_a_database(monkeypatch):

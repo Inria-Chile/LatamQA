@@ -494,6 +494,19 @@ the terminal as a table (rendered with `rich`) and writes, under
 `--bill_to` work as in `panel`. Each question costs 8 requests per model; a full
 field of 4,320 questions on P6 is about 242,000 requests (~45 min, ~$18).
 
+As in `panel`, HTTP 402 and the organisation's spending-limit 403 stop the whole
+run. `--no_billing_check` goes ahead instead: refused answers stay pending
+without counting toward any guard, the retry passes and the next `run` ask
+them again, and the ranking note counts them; `check` then no longer fails when
+the organisation cannot pay (it still fails when the token is not a member).
+Hugging Face's provisional holds (see `panel`) alone can reach a low spending
+limit: they come to about $8.40 per req/s of `--rate` with P6's seven models,
+so keep `--rate` below (limit − this month's spend) / 8.4, e.g. `--rate 1.5`
+under a $20 limit, with `--no_billing_check` as a backstop. Retry passes run at
+a fifth of `--rate`, but never below 1 req/s per model. If the limit is really
+used up, every pass is refused: stop the run (the next `run` resumes) or use
+`--retry_rounds 0`, and raise the limit.
+
 ## Leaderboard Management
 
 The `leaderboard` command-line tool manages and visualizes the leaderboard. Evaluation

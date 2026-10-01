@@ -427,6 +427,9 @@ def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[di
         note += f" {pending} question(s) still missing panel answers."
     if aborted:
         note += f" Stopped models: {', '.join(aborted)} (see their .ABORT files)."
+    refused = sum(pn.is_billing_refusal(recs[c["qid"]]) for recs in logs.values() for c in cells if c["qid"] in recs)
+    if refused:  # with --no_billing_check nothing else says why these answers are missing
+        note += f" {refused} answer(s) refused for billing (HTTP 402, spending limit): raise the limit or lower --rate."
     unanswered = []
     for key, recs in logs.items():  # a high rate over the whole field can mean a broken reasoning switch
         current = [recs[c["qid"]] for c in cells if recs.get(c["qid"], {}).get("status") == 200]
@@ -458,7 +461,11 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
         # in a model's log do not count against this run's --max_leaks.
         previous = {k: sum(pn.is_reasoning_leak(r) for r in recs.values()) for k, recs in done.items()}
         max_leaks = {k: v + args.max_leaks for k, v in previous.items()}
-        pn.run_panel_processes(specs, len(cells), out_dir, args, bill_to, max_leaks, strict_leaks=False)
+        if args.no_billing_check:
+            logger.warning("billing checks off: answers refused for billing (HTTP 402, spending-limit 403) stay pending")
+        pn.run_panel_processes(
+            specs, len(cells), out_dir, args, bill_to, max_leaks, strict_leaks=False, billing_stop=not args.no_billing_check
+        )
     else:
         print("every cell already has a panel answer; ranking only")
     rank_and_write(args, specs, teams, accepted, cells, out_dir)
@@ -483,6 +490,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--swap", action="append", help="replace a panel model, e.g. --swap qwen2.5-72b=qwen2.5-72b-di")
     parser.add_argument("--score_floor", type=float, default=SCORE_FLOOR, help="contribution floor of the team score")
     parser.add_argument("--bill_to", help="HF org billed through X-HF-Bill-To (default: the panel's bill_to)")
+    parser.add_argument(
+        "--no_billing_check",
+        action="store_true",
+        help="go ahead when HF refuses requests for billing (HTTP 402, spending-limit 403): leave those answers pending "
+        "instead of stopping the run; check does not fail on a billing org that cannot pay",
+    )
     parser.add_argument("--rate", type=float, default=pn.DEFAULT_RATE, help="requests/s per model (default 13.3)")
     parser.add_argument("--cap", action="append", help="in-flight cap override, e.g. --cap kimi-k2=120")
     parser.add_argument("--max_leaks", type=int, default=10, help="stop a model after this many new reasoning leaks")
@@ -503,7 +516,7 @@ def main(argv: list[str] | None = None) -> None:
         specs = pn.select_models(panel, args.models, args.swap)
         args.panel_name = panel["name"]
         if args.stage == "check":
-            pn.stage_check(args, panel, specs)
+            pn.stage_check(args, panel, specs, billing_check=not args.no_billing_check)
             return
         if not args.db:
             raise pn.PanelError("--db is required (a local datathon.db or hf:<org>/<dataset>), or set $DATATHON_DB")

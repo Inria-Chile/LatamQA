@@ -376,7 +376,7 @@ def install_fake_transport(specs: list[dict]):
     return restore
 
 
-_BILLING_ABORT = threading.Event()  # set on HTTP 402 in this process
+_BILLING_ABORT = threading.Event()  # set on HTTP 402 in this process, unless billing_stop is off
 
 
 def status_of(error: Exception) -> int:
@@ -388,11 +388,14 @@ def status_of(error: Exception) -> int:
     )
 
 
-def ask(litellm, spec: dict, item: dict, bill_to: str, token: str, max_attempts: int = MAX_ATTEMPTS) -> dict:
+def ask(
+    litellm, spec: dict, item: dict, bill_to: str, token: str, max_attempts: int = MAX_ATTEMPTS, billing_stop: bool = True
+) -> dict:
     """Send one question and return a flat record (content, usage, reasoning fields, provider headers, errors).
 
     429, 5xx, timeouts and connection errors back off exponentially up to ``max_attempts``; a cold-model 400 waits
-    20 s; any other error is recorded, not retried; 402 also sets the process-wide billing abort.
+    20 s; any other error is recorded, not retried; 402 also sets the process-wide billing abort unless
+    ``billing_stop`` is off.
     """
     kwargs: dict[str, Any] = dict(
         model=litellm_model(spec),
@@ -420,7 +423,7 @@ def ask(litellm, spec: dict, item: dict, bill_to: str, token: str, max_attempts:
         except Exception as e:  # every failure is recorded; the caller decides what is fatal
             code, msg = status_of(e), str(e)[:400]
             cold = code == 400 and "cold" in msg.lower()
-            if code == 402:
+            if code == 402 and billing_stop:
                 _BILLING_ABORT.set()
             if attempts < max_attempts and (code in RETRYABLE or cold) and not _BILLING_ABORT.is_set():
                 time.sleep((20 if cold else backoff) * (1 + random.random() * 0.25))
@@ -484,6 +487,11 @@ def is_leak(rec: dict) -> bool:
     return is_reasoning_leak(rec) or cut_prose
 
 
+def is_billing_refusal(rec: dict) -> bool:
+    """HF refused the request for billing: HTTP 402, or the 403 of the org's monthly spending limit."""
+    return rec.get("status") == 402 or (rec.get("status") == 403 and "spending limit" in (rec.get("error_msg") or ""))
+
+
 def score(rec: dict | None) -> tuple[str | None, str]:
     """(letter, rule). Rules: only / lead / cue / none from `parse_answer_v2`, or error / leak / missing (no letter)."""
     if rec is None:
@@ -532,6 +540,7 @@ def run_model(
     max_error_rate: float,
     retry_rounds: int,
     strict_leaks: bool = True,
+    billing_stop: bool = True,
 ) -> None:
     """Evaluate one model (in its own process), resuming from its JSONL log.
 
@@ -539,7 +548,8 @@ def run_model(
     unmistakable reasoning (`is_reasoning_leak`), so that untrusted questions that make a model refuse cannot stop it.
 
     Writes ``<key>.ABORT`` with the reason if the model stops early. A billing stop (402 or the spending-limit 403)
-    also writes ``STOP``, which halts every other model of the run.
+    also writes ``STOP``, which halts every other model of the run. With ``billing_stop=False`` those refusals stop
+    nothing and are left out of every guard: their questions stay unanswered for the retry passes and the next run.
     """
     litellm = setup_litellm(dry_run, [spec])
     token = hf_token(dry_run)
@@ -554,6 +564,8 @@ def run_model(
 
     def check(rec: dict) -> None:
         with lock:
+            if not billing_stop and is_billing_refusal(rec):
+                return  # left for the retry passes and the next run
             if rec["status"] == 200:
                 state["answered"] += 1
                 state["consec"] = 0
@@ -562,7 +574,7 @@ def run_model(
                 state["errors"] += 1
                 state["consec"] += 1
             n = state["answered"] + state["errors"]
-            spending_limit = rec["status"] == 403 and "spending limit" in rec.get("error_msg", "")
+            spending_limit = rec["status"] == 403 and is_billing_refusal(rec)
             if _BILLING_ABORT.is_set() or spending_limit:
                 state["reason"] = (
                     "billing: monthly spending limit for Inference Providers reached. HF holds a provisional $0.01 per "
@@ -590,7 +602,7 @@ def run_model(
         def job(item: dict) -> None:
             try:
                 try:
-                    rec = ask(litellm, spec, item, bill_to, token)
+                    rec = ask(litellm, spec, item, bill_to, token, billing_stop=billing_stop)
                 except Exception as e:  # e.g. a malformed response: record it so it is retried
                     rec = dict(
                         ts=_now(),
@@ -904,14 +916,29 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
 
 
 def run_panel_processes(
-    specs: list[dict], n_items: int, out_dir: Path, args, bill_to: str, max_leaks=None, strict_leaks: bool = True
+    specs: list[dict],
+    n_items: int,
+    out_dir: Path,
+    args,
+    bill_to: str,
+    max_leaks=None,
+    strict_leaks: bool = True,
+    billing_stop: bool = True,
 ) -> None:
     """Run every model on ``out_dir/items.json`` in parallel (one process each), print progress until all finish,
     and record the billing usage before and after. ``max_leaks`` (an int, or a dict by model key) overrides
-    ``args.max_leaks``; ``strict_leaks`` is passed to `run_model`."""
+    ``args.max_leaks``; ``strict_leaks`` and ``billing_stop`` are passed to `run_model`."""
     check_environment(args.dry_run)
     (out_dir / "STOP").unlink(missing_ok=True)
     caps = dict(kv.split("=") for kv in args.cap or [])
+
+    def abort_stamp(key: str) -> int | None:
+        try:
+            return (out_dir / f"{key}.ABORT").stat().st_mtime_ns
+        except FileNotFoundError:
+            return None
+
+    earlier = {s["key"]: abort_stamp(s["key"]) for s in specs}  # a worker removes or rewrites these when it ends
     snap0 = usage_snapshot(bill_to, args.dry_run)
     ctx = mp.get_context("spawn")
     procs = {}
@@ -932,6 +959,7 @@ def run_panel_processes(
                 args.max_error_rate,
                 args.retry_rounds,
                 strict_leaks,
+                billing_stop,
             ),
         )
         procs[s["key"]].start()
@@ -943,7 +971,7 @@ def run_panel_processes(
             recs = latest_records(out_dir / f"{s['key']}.jsonl")
             ok = sum(r["status"] == 200 for r in recs.values())
             leaks_now = sum(is_leak(r) for r in recs.values())
-            aborted = " ABORTED" if (out_dir / f"{s['key']}.ABORT").exists() else ""
+            aborted = " ABORTED" if abort_stamp(s["key"]) not in (None, earlier[s["key"]]) else ""
             parts.append(f"{s['key']} {ok}/{n_items} err {len(recs) - ok} leak {leaks_now}{aborted}")
         print(f"[{(time.time() - t0) / 60:5.1f} min] " + " | ".join(parts), flush=True)
     for p in procs.values():
@@ -966,8 +994,9 @@ def stage_report(args, panel: dict, specs: list[dict]) -> None:
     report(specs, items, out_dir, args.set_name, args.run, panel["name"], meta.get("dry_run", False))
 
 
-def stage_check(args, panel: dict, specs: list[dict]) -> None:
-    """Free pre-run checks; exits non-zero if any check fails."""
+def stage_check(args, panel: dict, specs: list[dict], billing_check: bool = True) -> None:
+    """Free pre-run checks; exits non-zero if any check fails. With ``billing_check=False`` a billing org that cannot
+    pay is only reported (the token must still belong to it)."""
     import importlib.metadata as md
 
     results: list[tuple[str, str, str]] = []
@@ -989,7 +1018,7 @@ def stage_check(args, panel: dict, specs: list[dict]) -> None:
     add("token owner", None, str(who.get("name")))
     add(
         f"org {bill_to} can pay",
-        bool(org and org.get("canPay")),
+        bool(org and org.get("canPay")) if billing_check else (None if org else False),
         f"member={org is not None} canPay={org and org.get('canPay')}",
     )
     for s in specs:

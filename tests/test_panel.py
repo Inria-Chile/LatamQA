@@ -3,7 +3,9 @@ worker (guards, resume, billing stop) and the offline end-to-end command. No net
 
 import copy
 import csv
+import inspect
 import json
+import os
 import types
 
 import pytest
@@ -328,6 +330,27 @@ def test_run_model_billing_error_stops_the_whole_run(tmp_path, monkeypatch, p6, 
     assert (tmp_path / "STOP").exists() and len(fake.calls) < 20
 
 
+def test_run_model_can_go_ahead_on_billing_errors(tmp_path, monkeypatch, p6, no_sleep):
+    limit = _ApiError(403, "You have exceeded your monthly spending limit for Inference Providers")
+
+    def refused_then_answered(fake):  # 55 402s in a row (more than the 50-consecutive-errors guard), then 5 403s
+        return lambda kwargs: (_ApiError(402) if len(fake.calls) <= 55 else limit) if len(fake.calls) <= 60 else _response()
+
+    spec = p6["models"][0]
+    fake = FakeLiteLLM()
+    fake.default = refused_then_answered(fake)
+    _run_worker(tmp_path, monkeypatch, spec, fake, n=40, cap=1, billing_stop=False)
+    recs = pn.latest_records(tmp_path / f"{spec['key']}.jsonl")
+    assert len(recs) == 40 and all(r["status"] == 200 for r in recs.values())  # the retry passes asked them again
+    assert not (tmp_path / "STOP").exists() and not (tmp_path / f"{spec['key']}.ABORT").exists()
+    assert not pn._BILLING_ABORT.is_set()
+    fake = FakeLiteLLM()
+    fake.default = refused_then_answered(fake)
+    (tmp_path / "x").mkdir()
+    _run_worker(tmp_path / "x", monkeypatch, spec, fake, n=40, cap=1)  # by default the first refusal stops the run
+    assert (tmp_path / "x" / "STOP").exists() and len(fake.calls) == 1
+
+
 def test_other_models_stop_when_the_run_is_stopped(tmp_path, monkeypatch, p6, no_sleep):
     (tmp_path / "STOP").write_text("kimi-k2: HTTP 402\n")
     spec = p6["models"][0]
@@ -371,6 +394,43 @@ def test_panel_command_dry_run_end_to_end(tmp_path, monkeypatch):
     # a paid run needs --yes
     with pytest.raises(SystemExit):
         pn.main(["run", "--questions", str(questions), "--results_dir", str(tmp_path / "paid")])
+
+
+def test_panel_run_keeps_the_billing_stop(tmp_path, monkeypatch):
+    spawned = []
+
+    def process(target, args=(), kwargs=None):  # records each worker's run_model arguments instead of spawning it
+        bound = inspect.signature(target).bind(*args, **(kwargs or {}))
+        bound.apply_defaults()
+        spawned.append(bound.arguments)
+        return types.SimpleNamespace(start=lambda: None, is_alive=lambda: False, join=lambda: None)
+
+    monkeypatch.setattr(pn, "mp", types.SimpleNamespace(get_context=lambda method: types.SimpleNamespace(Process=process)))
+    questions = tmp_path / "set.jsonl"
+    questions.write_text("\n".join(json.dumps(r) for r in ROWS) + "\n", encoding="utf-8")
+    pn.main(["run", "--questions", str(questions), "--results_dir", str(tmp_path / "out"), "--dry_run", "--models", "qwen3-4b"])
+    assert [(a["billing_stop"], a["strict_leaks"]) for a in spawned] == [(True, True)]
+
+
+def test_progress_ignores_abort_files_of_an_earlier_run(tmp_path, monkeypatch, p6, capsys):
+    specs = [m for m in p6["models"] if m["key"] in ("qwen3-4b", "kimi-k2")]
+    for s in specs:  # both models stopped in an earlier run
+        (tmp_path / f"{s['key']}.ABORT").write_text("billing: earlier run\n")
+        os.utime(tmp_path / f"{s['key']}.ABORT", (1_000_000_000, 1_000_000_000))
+
+    def process(target, args=(), kwargs=None):
+        def start():
+            if args[0]["key"] == "kimi-k2":  # stops again in this run
+                (tmp_path / "kimi-k2.ABORT").write_text("HTTP 403: forbidden\n")
+
+        alive = iter([True])
+        return types.SimpleNamespace(start=start, is_alive=lambda: next(alive, False), join=lambda: None)
+
+    monkeypatch.setattr(pn, "mp", types.SimpleNamespace(get_context=lambda method: types.SimpleNamespace(Process=process)))
+    args = dict(dry_run=True, cap=None, rate=1.0, max_leaks=3, max_error_rate=0.01, retry_rounds=2, progress_s=0)
+    pn.run_panel_processes(specs, 10, tmp_path, types.SimpleNamespace(**args), "org")
+    out = capsys.readouterr().out
+    assert "qwen3-4b 0/10 err 0 leak 0 |" in out and "kimi-k2 0/10 err 0 leak 0 ABORTED" in out
 
 
 def test_check_needs_no_question_set(monkeypatch):
