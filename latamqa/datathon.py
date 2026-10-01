@@ -363,7 +363,7 @@ def render_ranking(rows: list[dict], stamp: str, status: str, note: str, floor: 
     )
     table = Table(
         title=title,
-        caption=f"{note}\n{footnote(floor)}",
+        caption=Text(f"{note}\n{footnote(floor)}"),  # Text everywhere: team names are not rich markup ("[/x]" crashes)
         caption_justify="left",
         caption_style="dim",
         box=box.ROUNDED,
@@ -383,8 +383,8 @@ def render_ranking(rows: list[dict], stamp: str, status: str, note: str, floor: 
         review = Text(str(r.get("review", 0)), style="bold red" if r.get("review") else "")
         table.add_row(
             str(r["rank"]),
-            str(r["team"]),
-            str(r["country"] or "—"),
+            Text(str(r["team"])),
+            Text(str(r["country"] or "—")),
             f"{r['team_score']:.4f}",
             _pct(r["mean_accuracy"]),
             str(r["accepted"]),
@@ -795,6 +795,7 @@ def write_source_report(checks: dict[str, dict], accepted: list[dict], out_dir: 
     from rich import box
     from rich.console import Console
     from rich.table import Table
+    from rich.text import Text
 
     rank_dir = out_dir / "rankings"
     rank_dir.mkdir(parents=True, exist_ok=True)
@@ -828,7 +829,7 @@ def write_source_report(checks: dict[str, dict], accepted: list[dict], out_dir: 
         table.add_column(name)
     for qid, r in sorted(checks.items(), key=lambda kv: (by_id[kv[0]]["team"], kv[0])):
         if r["flag"]:
-            table.add_row(by_id[qid]["team"], qid, r["verdict"], "\n".join(r["issues"]) or "—")
+            table.add_row(Text(by_id[qid]["team"]), Text(qid), Text(r["verdict"]), Text("\n".join(r["issues"]) or "—"))
     console = Console()
     console.print(table)
     console.print(f"-> {path}", highlight=False, soft_wrap=True)

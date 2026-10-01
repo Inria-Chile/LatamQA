@@ -217,6 +217,11 @@ def test_render_ranking():
     assert "Datathon ranking · 20261003T120000Z · PROVISIONAL" in text
     assert "T | One" in text and "1.2500" in text and "20.0%" in text and "—" in text
     assert "a note" in text and "max(0, score - 0.4)" in text
+    rows[0].update(team="Los [bold]Cóndores [/x]", country="CL [x]")  # team names are not rich markup
+    console = Console(file=io.StringIO(), record=True, width=160)
+    console.print(dtn.render_ranking(rows, "20261003T120000Z", "complete", "note [y]"))
+    text = console.export_text()
+    assert "Los [bold]Cóndores [/x]" in text and "CL [x]" in text and "note [y]" in text
 
 
 def test_write_outputs(tmp_path, db):
@@ -494,3 +499,11 @@ def test_dry_run_writes_the_results_file_without_publishing(db, tmp_path, monkey
     payload = json.loads(path.read_text())
     assert payload["dry_run"] is True and payload["status"] == "complete"
     assert {q["status"] for q in payload["questions"]} == {"scored"}
+
+
+def test_source_report_shows_participant_text_verbatim(tmp_path, capsys):
+    accepted = [dict(id="q1", team="Equipo [/x]")]
+    checks = {"q1": dict(verdict="key not in source", flag=True, issues=["the key «[bold]Sí» does not appear"], articles=[])}
+    path = dtn.write_source_report(checks, accepted, tmp_path)
+    out = capsys.readouterr().out
+    assert "Equipo [/x]" in out and "[bold]Sí" in out and path.exists()
