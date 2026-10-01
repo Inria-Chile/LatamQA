@@ -261,9 +261,10 @@ def test_score(rec, expected):
 def test_latest_records_prefers_a_200(tmp_path):
     path = tmp_path / "m.jsonl"
     lines = [{"qid": "a", "status": 503}, {"qid": "a", "status": 200}, {"qid": "a", "status": 429}, {"qid": "b", "status": 500}]
+    lines += [{"qid": "b", "status": 402}]
     path.write_text("".join(json.dumps(x) + "\n" for x in lines))
     last = pn.latest_records(path)
-    assert last["a"]["status"] == 200 and last["b"]["status"] == 500
+    assert last["a"]["status"] == 200 and last["b"]["status"] == 402  # without a 200, the last error
 
 
 def test_estimate_cost(p6):
