@@ -160,7 +160,8 @@ def test_score_questions_follows_the_spec(db):
 
 def _stats(**scores):
     return {
-        qid: dict(score=s, accuracy=None if s is None else 1 - s, pending=0, no_answer_rate=0.0) for qid, s in scores.items()
+        qid: dict(score=s, accuracy=None if s is None else 1 - s, pending=0, no_answer_rate=0.0, consensus_share=None)
+        for qid, s in scores.items()
     }
 
 
@@ -314,3 +315,35 @@ def test_datathon_needs_a_database(monkeypatch):
     monkeypatch.delenv("DATATHON_DB", raising=False)
     with pytest.raises(SystemExit):
         dtn.main(["rank"])
+
+
+def test_consensus_on_one_wrong_option(db):
+    teams, questions = dtn.read_db(db)
+    accepted, cells, _ = dtn.build_cells(teams, questions)
+    q1 = [c for c in cells if c["question_id"] == "q1"]
+    pick = {c["qid"]: "ABCD"[c["order"].index(1)] for c in q1}  # always distractor 1, whatever the order or language
+    logs = {m: {c["qid"]: _ok(c, pick[c["qid"]]) for c in q1} for m in ("a", "b")}
+    stats = dtn.score_questions(accepted, cells, logs)
+    assert stats["q1"]["consensus_option"] == "No 1" and stats["q1"]["consensus_share"] == 1.0
+    assert stats["q1"]["score"] == 1.0 and stats["q2"]["consensus_share"] is None
+    reasons = dtn.review_reasons(stats, {"q3": {"flag": True}})
+    assert reasons["q1"] == ["consensus"] and reasons["q3"] == ["source"] and reasons["q2"] == []
+    rows = {r["team"]: r for r in dtn.rank_teams(teams, accepted, stats, reasons=reasons)}
+    assert rows["Equipo Uno"]["review"] == 1 and rows["Equipo Uno"]["flagged_consensus"] == 1
+    assert rows["Equipo | Dos"]["review"] == 0 and rows["Equipo | Dos"]["flagged_source"] == 1  # q3 earns nothing
+
+
+def test_verify_stage_without_network(db, tmp_path, monkeypatch):
+    from latamqa import source_check as sc
+
+    calls = []
+    monkeypatch.setattr(sc.Wiki, "_http", lambda self, url: calls.append(url) or (404, ""))
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    out = tmp_path / "out"
+    dtn.main(["verify", "--db", str(db), "--results_dir", str(out), "--models", "qwen3-4b", "--dry_run"])
+    event = out / "llaca-2026"
+    checks = json.loads((event / sc.CHECKS_FILE).read_text())
+    assert set(checks) == {"q1", "q2", "q3", "q7"} and {c["verdict"] for c in checks.values()} == {"no source"}
+    assert calls == []  # no sources cited, nothing fetched
+    assert "Source check: 4 of 4 questions checked" in (event / "ranking_latest.md").read_text()
+    assert list((event / "rankings").glob("sources_*.csv"))

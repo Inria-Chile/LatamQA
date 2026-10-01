@@ -47,6 +47,7 @@ from pathlib import Path
 from structlog import get_logger
 
 from latamqa import panel as pn
+from latamqa import source_check as sc
 from latamqa.mcq_core import V2_PROMPT_TEMPLATE, build_prompt
 
 logger = get_logger(__name__)
@@ -58,10 +59,15 @@ LANGUAGES = {  # language -> (question, answer, distractor1, distractor2, distra
     "regional": ("question_text", "answer", "distractor1", "distractor2", "distractor3"),
     "english": ("question_en", "answer_en", "distractor1_en", "distractor2_en", "distractor3_en"),
 }
+# read when present: the cited sources (Wikidata ids and Wikipedia links) and the provenance note (spec §3)
+OPTIONAL_COLUMNS = ("wikidata_qids", "cultural_provenance")
 N_PERMUTATIONS = 4
 SCORE_FLOOR = 0.5  # spec §7: a question earns points only above this score
 QUOTA = 60  # spec §3.2: questions per team; the tie-break vectors are padded to this length
 NO_ANSWER_FLAG = 0.30  # spec §6.2: questions with more unanswered replies than this go to the committee
+# A question where at least this share of the panel's answers picks the same wrong option is flagged for review: the
+# key may be wrong or ambiguous (a wrong key "fools" the panel and earns points, as the Sep 2026 test run showed).
+CONSENSUS_FLAG = 0.5
 
 
 # ---------------------------------------------------------------------------------------------------------- questions
@@ -137,7 +143,8 @@ def read_db(path: Path) -> tuple[list[dict], list[dict]]:
         missing = [c for c in wanted if c not in columns]
         if missing:
             raise pn.PanelError(f"{path} lacks question columns {missing}: is it a datathon app database?")
-        questions = [dict(r) for r in con.execute(f"SELECT {', '.join(wanted)} FROM questions")]
+        optional = [c for c in OPTIONAL_COLUMNS if c in columns]  # sources and provenance, for `datathon verify`
+        questions = [dict(r) for r in con.execute(f"SELECT {', '.join(wanted + optional)} FROM questions")]
     finally:
         con.close()
     return teams, questions
@@ -177,6 +184,7 @@ def build_cells(teams: list[dict], questions: list[dict]) -> tuple[list[dict], l
                         group=team["name"],
                         lang=lang,
                         perm=r,
+                        order=order,
                         options=shown,
                         correct=correct,
                         prompt=build_prompt(V2_PROMPT_TEMPLATE, stem, shown),
@@ -189,11 +197,13 @@ def build_cells(teams: list[dict], questions: list[dict]) -> tuple[list[dict], l
 
 
 def score_questions(accepted: list[dict], cells: list[dict], logs: dict[str, dict[str, dict]]) -> dict[str, dict]:
-    """Per-question panel results over the current cells: received, correct, unanswered, pending, score, accuracy.
+    """Per-question panel results over the current cells: received, correct, unanswered, pending, score, accuracy,
+    and the wrong option the panel picked most (``consensus_option``, its regional text, and ``consensus_share`` of
+    the received answers; wrong picks are counted per option across languages and option orders).
 
     ``logs`` maps each model key to its latest record per cell id (`panel.latest_records`).
     """
-    stats = {q["id"]: dict(received=0, correct=0, no_answer=0, pending=0) for q in accepted}
+    stats = {q["id"]: dict(received=0, correct=0, no_answer=0, pending=0, picks=[0, 0, 0, 0]) for q in accepted}
     for cell in cells:
         s = stats[cell["question_id"]]
         for recs in logs.values():
@@ -204,22 +214,52 @@ def score_questions(accepted: list[dict], cells: list[dict], logs: dict[str, dic
             s["received"] += 1
             s["correct"] += letter == cell["correct"]
             s["no_answer"] += rule in ("none", "leak")
-    for s in stats.values():
+            if letter and "order" in cell:
+                s["picks"][cell["order"]["ABCD".index(letter)]] += 1
+    texts = {q["id"]: [q[c] for c in LANGUAGES["regional"][1:]] for q in accepted}
+    for qid, s in stats.items():
         n = s["received"]
         s["accuracy"] = s["correct"] / n if n else None
         s["score"] = 1 - s["correct"] / n if n else None
         s["no_answer_rate"] = s["no_answer"] / n if n else None
+        top = max(range(1, 4), key=lambda i: s["picks"][i])
+        s["consensus_option"] = texts[qid][top] if n and s["picks"][top] else None
+        s["consensus_share"] = s["picks"][top] / n if n else None
     return stats
 
 
+def review_reasons(stats: dict[str, dict], checks: dict[str, dict] | None = None, consensus: float = CONSENSUS_FLAG):
+    """Why each question deserves a committee look: ``consensus`` (most answers agree on one wrong option),
+    ``unanswered`` (more than 30 % of replies without a letter) and ``source`` (the cited source does not back the
+    key, see `latamqa.source_check`). Flags never change a score (spec §3.1: presumption of validity)."""
+    reasons = {}
+    for qid, s in stats.items():
+        r = []
+        if (s["consensus_share"] or 0) >= consensus:
+            r.append("consensus")
+        if (s["no_answer_rate"] or 0) > NO_ANSWER_FLAG:
+            r.append("unanswered")
+        if (checks or {}).get(qid, {}).get("flag"):
+            r.append("source")
+        reasons[qid] = r
+    return reasons
+
+
 def rank_teams(
-    teams: list[dict], accepted: list[dict], stats: dict[str, dict], floor: float = SCORE_FLOOR, quota: int = QUOTA
+    teams: list[dict],
+    accepted: list[dict],
+    stats: dict[str, dict],
+    floor: float = SCORE_FLOOR,
+    quota: int = QUOTA,
+    reasons: dict[str, list[str]] | None = None,
 ) -> list[dict]:
     """Team rows sorted by the spec's team score and tie-breaks, with the mean panel accuracy for reference.
 
     A question with no answer received yet contributes 0 (spec §3.1). Teams without accepted questions rank last
-    among equal scores.
+    among equal scores. ``review`` counts the team's point-earning questions that have a review reason
+    (`review_reasons`): the ones the committee should check before results are final.
     """
+    reasons = reasons if reasons is not None else review_reasons(stats)
     by_team: dict[int, list[dict]] = {t["id"]: [] for t in teams}
     for q in accepted:
         by_team[q["team_id"]].append(q)
@@ -241,7 +281,10 @@ def rank_teams(
                 scored=len(scored),
                 earning=sum(s > floor for s in scored),
                 pending_questions=sum(stats[q["id"]]["pending"] > 0 for q in qs),
-                flagged_no_answer=sum((stats[q["id"]]["no_answer_rate"] or 0) > NO_ANSWER_FLAG for q in qs),
+                flagged_no_answer=sum("unanswered" in reasons[q["id"]] for q in qs),
+                flagged_consensus=sum("consensus" in reasons[q["id"]] for q in qs),
+                flagged_source=sum("source" in reasons[q["id"]] for q in qs),
+                review=sum(bool(reasons[q["id"]]) and (stats[q["id"]]["score"] or 0) > floor for q in qs),
                 _vector=(vector + [0.0] * quota)[: max(quota, len(vector))],
                 _seq_sum=sum(seqs) if seqs else float("inf"),
                 _seq_min=min(seqs) if seqs else float("inf"),
@@ -269,7 +312,9 @@ def footnote(floor: float = SCORE_FLOOR) -> str:
     return (
         f"Team score = sum over accepted questions of max(0, score - {floor}), with score = 1 - panel accuracy on the "
         "question. Mean panel accuracy is shown for reference only. Scored = questions with at least one panel answer; "
-        "earning points = score above the floor; pending = questions still missing answers."
+        "earning points = score above the floor; pending = questions still missing answers; review = point-earning "
+        "questions flagged for the committee (panel consensus on one wrong option, unanswered replies, or a cited "
+        "source that does not back the key)."
     )
 
 
@@ -299,11 +344,12 @@ def render_ranking(rows: list[dict], stamp: str, status: str, note: str, floor: 
     table.add_column("Country")
     table.add_column("Team score", justify="right", style="bold cyan")
     table.add_column("Mean panel accuracy", justify="right")
-    for name in ("Accepted", "Scored", "Earning points", "Pending"):
+    for name in ("Accepted", "Scored", "Earning points", "Pending", "Review"):
         table.add_column(name, justify="right")
     for r in rows:
         style = "bold" if r["rank"] <= 3 and r["team_score"] > 0 else "dim" if r["team_score"] == 0 else None
         pending = Text(str(r["pending_questions"]), style="yellow" if r["pending_questions"] else "")
+        review = Text(str(r.get("review", 0)), style="bold red" if r.get("review") else "")
         table.add_row(
             str(r["rank"]),
             str(r["team"]),
@@ -314,6 +360,7 @@ def render_ranking(rows: list[dict], stamp: str, status: str, note: str, floor: 
             str(r["scored"]),
             str(r["earning"]),
             pending,
+            review,
             style=style,
         )
     return table
@@ -328,13 +375,17 @@ def write_outputs(
     status: str,
     note: str,
     floor: float = SCORE_FLOOR,
+    reasons: dict[str, list[str]] | None = None,
+    checks: dict[str, dict] | None = None,
 ) -> Path:
     """Write the ranking (Markdown + CSV) and the per-question scores for this run, refresh ``ranking_latest``, and
-    show the ranking in the terminal."""
+    show the ranking in the terminal. ``reasons`` are the review flags (`review_reasons`) and ``checks`` the source
+    checks (`latamqa.source_check`), both by question id."""
+    reasons, checks = reasons or {}, checks or {}
     rank_dir = out_dir / "rankings"
     rank_dir.mkdir(parents=True, exist_ok=True)
     columns = ["rank", "team", "country", "team_score", "mean_accuracy", "accepted", "scored", "earning"]
-    columns += ["pending_questions", "flagged_no_answer"]
+    columns += ["pending_questions", "review", "flagged_consensus", "flagged_no_answer", "flagged_source"]
     with open(rank_dir / f"ranking_{stamp}.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
@@ -345,12 +396,12 @@ def write_outputs(
         "",
         note,
         "",
-        "| Rank | Team | Country | Team score | Mean panel accuracy | Accepted | Scored | Earning points | Pending |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Rank | Team | Country | Team score | Mean panel accuracy | Accepted | Scored | Earning points | Pending | Review |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     lines += [
         f"| {r['rank']} | {_cell(r['team'])} | {_cell(r['country'])} | {r['team_score']:.4f} | {_pct(r['mean_accuracy'])} | "
-        f"{r['accepted']} | {r['scored']} | {r['earning']} | {r['pending_questions']} |"
+        f"{r['accepted']} | {r['scored']} | {r['earning']} | {r['pending_questions']} | {r.get('review', 0)} |"
         for r in rows
     ]
     lines += ["", footnote(floor)]
@@ -359,7 +410,8 @@ def write_outputs(
     shutil.copyfile(rank_dir / f"ranking_{stamp}.md", out_dir / "ranking_latest.md")
     shutil.copyfile(rank_dir / f"ranking_{stamp}.csv", out_dir / "ranking_latest.csv")
     qcols = ["team", "country", "question_id", "sequence", "state", "score", "accuracy", "contribution", "received"]
-    qcols += ["correct", "pending", "no_answer_rate", "flag_no_answer"]
+    qcols += ["correct", "pending", "no_answer_rate", "consensus_option", "consensus_share", "source_verdict"]
+    qcols += ["source_detail", "reader_verdict", "review"]
     with open(rank_dir / f"questions_{stamp}.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=qcols)
         writer.writeheader()
@@ -379,7 +431,12 @@ def write_outputs(
                     correct=s["correct"],
                     pending=s["pending"],
                     no_answer_rate=s["no_answer_rate"],
-                    flag_no_answer=(s["no_answer_rate"] or 0) > NO_ANSWER_FLAG,
+                    consensus_option=s["consensus_option"],
+                    consensus_share=s["consensus_share"],
+                    source_verdict=checks.get(q["id"], {}).get("verdict", "not checked"),
+                    source_detail="; ".join(checks.get(q["id"], {}).get("issues", [])),
+                    reader_verdict=checks.get(q["id"], {}).get("reader_verdict"),
+                    review=",".join(reasons.get(q["id"], [])),
                 )
             )
     from rich.console import Console
@@ -417,7 +474,9 @@ def load_state(args, specs: list[dict]) -> tuple[list[dict], list[dict], list[di
 def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[dict], cells: list[dict], out_dir: Path):
     logs = {s["key"]: pn.latest_records(out_dir / f"{s['key']}.jsonl") for s in specs}
     stats = score_questions(accepted, cells, logs)
-    rows = rank_teams(teams, accepted, stats, args.score_floor)
+    checks = sc.load_checks(out_dir, accepted)
+    reasons = review_reasons(stats, checks, args.consensus_flag)
+    rows = rank_teams(teams, accepted, stats, args.score_floor, reasons=reasons)
     aborted = [s["key"] for s in specs if (out_dir / f"{s['key']}.ABORT").exists()]
     pending = sum(r["pending_questions"] for r in rows)
     complete = not aborted and not pending
@@ -437,10 +496,21 @@ def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[di
             unanswered.append(f"{key} {sum(pn.score(r)[1] in ('none', 'leak') for r in current) / len(current):.1%}")
     if unanswered:
         note += f" Replies without an answer letter: {', '.join(unanswered)}."
+    review = sum(r["review"] for r in rows)
+    if review:
+        kinds = {k: sum(k in reasons[q["id"]] and (stats[q["id"]]["score"] or 0) > args.score_floor for q in accepted)
+                 for k in ("consensus", "unanswered", "source")}  # fmt: skip
+        detail = ", ".join(f"{v} {k}" for k, v in kinds.items() if v)
+        note += f" {review} point-earning question(s) to review before results are final ({detail}): see questions CSV."
+    note += (
+        f" Source check: {len(checks)} of {len(accepted)} questions checked (`datathon verify`)."
+        if checks
+        else " Source check not run (`datathon verify`)."
+    )
     if args.dry_run:
         note += " DRY RUN: fake answers, not a real ranking."
     stamp = unique_stamp(out_dir / "rankings", "ranking_{}.md")
-    return write_outputs(rows, accepted, stats, out_dir, stamp, status, note, args.score_floor)
+    return write_outputs(rows, accepted, stats, out_dir, stamp, status, note, args.score_floor, reasons, checks)
 
 
 def stage_run(args, panel: dict, specs: list[dict]) -> None:
@@ -471,6 +541,94 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
     rank_and_write(args, specs, teams, accepted, cells, out_dir)
 
 
+def stage_verify(args, panel: dict, specs: list[dict]) -> None:
+    """Check new or edited questions against their cited Wikipedia/Wikidata sources (`latamqa.source_check`), list
+    the flagged ones, save ``rankings/sources_<time>.csv``, and re-rank so the review counts include the source flags.
+    With ``--reader``, a panel model also reads each cited source and says which option it supports (paid)."""
+    teams, accepted, cells, out_dir = load_state(args, specs)
+    reader, litellm, token, bill_to = None, None, "", args.bill_to or panel["bill_to"]
+    if args.reader:
+        known = pn.all_models(panel)  # the run's panel first, then any panel file (e.g. a P6 model for P6-small)
+        for path in sorted(pn.PANELS_DIR.glob("*.yaml")):
+            known = pn.all_models(pn.load_panel(path)) | known
+        if args.reader not in known:
+            raise pn.PanelError(f"--reader {args.reader}: unknown model key; known: {sorted(known)}")
+        reader = known[args.reader]
+        current = sc.load_checks(out_dir, accepted)
+        n = sum(
+            any(sc.parse_sources(q.get("wikidata_qids")))
+            and (q["id"] not in current or current[q["id"]].get("reader") != reader["key"])
+            for q in accepted
+        )
+        cost = n * ((sc.EXCERPT_CHARS / 3 + 300) * reader["price"]["input"] + 16 * reader["price"]["output"]) / 1e6
+        print(f"reader {reader['key']}: up to {n} requests, estimated cost <= ${cost:.2f}, billed to {bill_to}")
+        if n and cost > args.budget_usd:
+            raise pn.PanelError(f"estimate exceeds --budget_usd {args.budget_usd}")
+        if n and not (args.yes or args.dry_run):
+            raise pn.PanelError("the reader is paid: re-run with --yes (or --dry_run to test offline)")
+        if n:
+            litellm, token = pn.setup_litellm(args.dry_run, [reader]), pn.hf_token(args.dry_run)
+    wiki = sc.Wiki(out_dir / "sources", pause=args.wiki_pause)
+    checks, new = sc.check_all(
+        accepted,
+        out_dir,
+        wiki,
+        reader=reader if litellm else None,
+        litellm=litellm,
+        bill_to=bill_to,
+        token=token,
+        order_of=lambda qid: balanced_permutations(str(qid))[0][0],
+    )
+    print(f"checked {new} new or edited question(s); {len(checks)} of {len(accepted)} have a current check")
+    write_source_report(checks, accepted, out_dir)
+    rank_and_write(args, specs, teams, accepted, cells, out_dir)
+
+
+def write_source_report(checks: dict[str, dict], accepted: list[dict], out_dir: Path) -> Path:
+    """Save every current check to ``rankings/sources_<time>.csv`` and show the flagged ones in the terminal."""
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+
+    rank_dir = out_dir / "rankings"
+    rank_dir.mkdir(parents=True, exist_ok=True)
+    path = rank_dir / f"sources_{unique_stamp(rank_dir, 'sources_{}.csv')}.csv"
+    by_id = {q["id"]: q for q in accepted}
+    columns = ["team", "question_id", "verdict", "flag", "issues", "articles", "sources", "reader", "reader_verdict"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        for qid, r in sorted(checks.items(), key=lambda kv: (by_id[kv[0]]["team"], kv[0])):
+            writer.writerow(
+                dict(
+                    r,
+                    team=by_id[qid]["team"],
+                    question_id=qid,
+                    issues="; ".join(r["issues"]),
+                    articles="; ".join(r["articles"]),
+                )
+            )
+    verdicts: dict[str, int] = {}
+    for r in checks.values():
+        verdicts[r["verdict"]] = verdicts.get(r["verdict"], 0) + 1
+    table = Table(
+        title=f"Source check: {sum(r['flag'] for r in checks.values())} flagged of {len(checks)} checked",
+        caption=" · ".join(f"{k}: {v}" for k, v in sorted(verdicts.items(), key=lambda kv: -kv[1])),
+        caption_justify="left",
+        box=box.ROUNDED,
+        header_style="bold",
+    )
+    for name in ("Team", "Question", "Verdict", "Why"):
+        table.add_column(name)
+    for qid, r in sorted(checks.items(), key=lambda kv: (by_id[kv[0]]["team"], kv[0])):
+        if r["flag"]:
+            table.add_row(by_id[qid]["team"], qid, r["verdict"], "\n".join(r["issues"]) or "—")
+    console = Console()
+    console.print(table)
+    console.print(f"-> {path}", highlight=False, soft_wrap=True)
+    return path
+
+
 def stage_rank(args, panel: dict, specs: list[dict]) -> None:
     teams, accepted, cells, out_dir = load_state(args, specs)
     rank_and_write(args, specs, teams, accepted, cells, out_dir)
@@ -478,7 +636,7 @@ def stage_rank(args, panel: dict, specs: list[dict]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="datathon", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("stage", choices=["check", "run", "rank"])
+    parser.add_argument("stage", choices=["check", "run", "rank", "verify"])
     parser.add_argument(
         "--db",
         default=os.environ.get("DATATHON_DB"),
@@ -489,6 +647,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models", help="comma-separated model keys (default: the panel's models)")
     parser.add_argument("--swap", action="append", help="replace a panel model, e.g. --swap qwen2.5-72b=qwen2.5-72b-di")
     parser.add_argument("--score_floor", type=float, default=SCORE_FLOOR, help="contribution floor of the team score")
+    parser.add_argument(
+        "--consensus_flag",
+        type=float,
+        default=CONSENSUS_FLAG,
+        help="flag a question for review when this share of the panel's answers picks the same wrong option",
+    )
     parser.add_argument("--bill_to", help="HF org billed through X-HF-Bill-To (default: the panel's bill_to)")
     parser.add_argument(
         "--no_billing_check",
@@ -504,6 +668,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--budget_usd", type=float, default=40.0, help="refuse to start if the cost estimate exceeds this")
     parser.add_argument("--progress_s", type=float, default=60.0, help="seconds between progress lines")
     parser.add_argument("--results_dir", default=str(DEFAULT_RESULTS_DIR), help="root folder for datathon results")
+    parser.add_argument("--reader", help="verify: panel model key that also reads each cited source (paid), e.g. qwen3.5-397b")
+    parser.add_argument("--wiki_pause", type=float, default=0.5, help="verify: seconds between Wikipedia/Wikidata requests")
     parser.add_argument("--yes", action="store_true", help="confirm a paid run")
     parser.add_argument("--dry_run", action="store_true", help="offline: fake provider, no network, no cost")
     return parser
@@ -520,7 +686,7 @@ def main(argv: list[str] | None = None) -> None:
             return
         if not args.db:
             raise pn.PanelError("--db is required (a local datathon.db or hf:<org>/<dataset>), or set $DATATHON_DB")
-        {"run": stage_run, "rank": stage_rank}[args.stage](args, panel, specs)
+        {"run": stage_run, "rank": stage_rank, "verify": stage_verify}[args.stage](args, panel, specs)
     except pn.PanelError as e:
         logger.fatal(str(e))
         sys.exit(-1)
