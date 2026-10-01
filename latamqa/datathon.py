@@ -732,7 +732,15 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
         if args.no_billing_check:
             logger.warning("billing checks off: answers refused for billing (HTTP 402, spending-limit 403) stay pending")
         pn.run_panel_processes(
-            specs, len(cells), out_dir, args, bill_to, max_leaks, strict_leaks=False, billing_stop=not args.no_billing_check
+            specs,
+            len(cells),
+            out_dir,
+            args,
+            bill_to,
+            max_leaks,
+            strict_leaks=False,
+            billing_stop=not args.no_billing_check,
+            group_label="team",
         )
     else:
         print("every cell already has a panel answer; ranking only")
@@ -864,7 +872,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_error_rate", type=float, default=0.01, help="stop a model above this error rate")
     parser.add_argument("--retry_rounds", type=int, default=2, help="slower passes for answers that still failed")
     parser.add_argument("--budget_usd", type=float, default=40.0, help="refuse to start if the cost estimate exceeds this")
-    parser.add_argument("--progress_s", type=float, default=60.0, help="seconds between progress lines")
+    parser.add_argument(
+        "--progress_s", type=float, default=60.0, help="seconds between progress lines when the output is not a terminal"
+    )
     parser.add_argument("--results_dir", default=str(DEFAULT_RESULTS_DIR), help="root folder for datathon results")
     parser.add_argument(
         "--publish",

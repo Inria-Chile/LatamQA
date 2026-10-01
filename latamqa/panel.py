@@ -510,7 +510,7 @@ def latest_records(path: Path) -> dict[str, dict]:
         with open(path, encoding="utf-8") as f:
             for line in f:
                 r = json.loads(line)
-                if r["qid"] not in last or r["status"] == 200:
+                if r["qid"] not in last or r["status"] == 200 or last[r["qid"]]["status"] != 200:
                     last[r["qid"]] = r
     return last
 
@@ -930,22 +930,19 @@ def run_panel_processes(
     max_leaks=None,
     strict_leaks: bool = True,
     billing_stop: bool = True,
+    group_label: str = "group",
 ) -> None:
-    """Run every model on ``out_dir/items.json`` in parallel (one process each), print progress until all finish,
-    and record the billing usage before and after. ``max_leaks`` (an int, or a dict by model key) overrides
-    ``args.max_leaks``; ``strict_leaks`` and ``billing_stop`` are passed to `run_model`."""
+    """Run every model on ``out_dir/items.json`` in parallel (one process each), show progress until all finish
+    (`progress.RunWatch`, by model and by item group, called ``group_label``), and record the billing usage before
+    and after. ``max_leaks`` (an int, or a dict by model key) overrides ``args.max_leaks``; ``strict_leaks`` and
+    ``billing_stop`` are passed to `run_model`."""
+    from latamqa.progress import RunWatch
+
     check_environment(args.dry_run)
     (out_dir / "STOP").unlink(missing_ok=True)
     caps = dict(kv.split("=") for kv in args.cap or [])
-
-    def abort_stamp(key: str) -> int | None:
-        try:
-            return (out_dir / f"{key}.ABORT").stat().st_mtime_ns
-        except FileNotFoundError:
-            return None
-
-    earlier = {s["key"]: abort_stamp(s["key"]) for s in specs}  # a worker removes or rewrites these when it ends
-    leak = is_leak if strict_leaks else is_reasoning_leak  # count what the workers' stop rule counts
+    # before the workers start (see its docstring); leaks are counted with the workers' stop rule
+    watch = RunWatch(specs, out_dir, n_items, group_label, strict_leaks=strict_leaks)
     snap0 = usage_snapshot(bill_to, args.dry_run)
     ctx = mp.get_context("spawn")
     procs = {}
@@ -969,18 +966,9 @@ def run_panel_processes(
                 billing_stop,
             ),
         )
-        procs[s["key"]].start()
-    t0 = time.time()
-    while any(p.is_alive() for p in procs.values()):
-        time.sleep(args.progress_s)
-        parts = []
-        for s in specs:
-            recs = latest_records(out_dir / f"{s['key']}.jsonl")
-            ok = sum(r["status"] == 200 for r in recs.values())
-            leaks_now = sum(leak(r) for r in recs.values())
-            aborted = " ABORTED" if abort_stamp(s["key"]) not in (None, earlier[s["key"]]) else ""
-            parts.append(f"{s['key']} {ok}/{n_items} err {len(recs) - ok} leak {leaks_now}{aborted}")
-        print(f"[{(time.time() - t0) / 60:5.1f} min] " + " | ".join(parts), flush=True)
+        with watch.worker_output(s["key"]):
+            procs[s["key"]].start()
+    watch.watch(procs, args.progress_s)
     for p in procs.values():
         p.join()
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%H%M%S")
@@ -1079,7 +1067,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max_error_rate", type=float, default=0.01, help="stop a model above this error rate")
     parser.add_argument("--retry_rounds", type=int, default=2, help="slower passes for questions that still failed")
     parser.add_argument("--budget_usd", type=float, default=40.0, help="refuse to start if the cost estimate exceeds this")
-    parser.add_argument("--progress_s", type=float, default=60.0, help="seconds between progress lines")
+    parser.add_argument(
+        "--progress_s", type=float, default=60.0, help="seconds between progress lines when the output is not a terminal"
+    )
     parser.add_argument("--results_dir", default=str(DEFAULT_RESULTS_DIR), help="root folder for panel results")
     parser.add_argument("--col_id", default="article_id", help="question id column (optional)")
     parser.add_argument("--col_question", default="question")

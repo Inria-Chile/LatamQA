@@ -376,6 +376,13 @@ Add `--dry_run` to run everything offline against a fake provider (no network,
 no cost). Re-running the same `run` command resumes it: only questions without
 an answer are sent.
 
+In a terminal, a run shows its progress live (rendered with `rich`): one bar per
+model with its answers, rate, time left, errors, leaks and billing refusals,
+plus one bar per `--col_group` group. The workers' own output (warnings,
+tracebacks) then goes to `<key>.worker.log` in the run folder, kept only when
+not empty. When the output is not a terminal (a file, `tee`, CI), a plain
+progress line is printed every `--progress_s` seconds instead (default 60).
+
 ### Panels
 
 A panel is a YAML file in [`latamqa/panels/`](latamqa/panels/), validated
@@ -482,9 +489,11 @@ v2 (see [`panel`](#panel-open-weight-panel-on-hugging-face-inference-providers))
 
 Runs are incremental: each `run` sends only the answers still missing (new
 questions, questions whose text was edited, earlier errors) and then re-ranks
-every team from a fresh snapshot of the database. Each run shows the ranking in
-the terminal as a table (rendered with `rich`) and writes, under
-`results/datathon/<event>/`:
+every team from a fresh snapshot of the database. While the panel answers, a
+terminal shows live progress as in `panel`, with one bar per team and the count
+of teams fully evaluated (every cell answered by every model). Each run then
+shows the ranking in the terminal as a table (rendered with `rich`) and writes,
+under `results/datathon/<event>/`:
 
 * `rankings/ranking_<UTC time>.md` and `.csv`: the ranking (rank, team, country, team score, mean panel accuracy, accepted, scored and point-earning questions, questions still pending, and **review**: point-earning questions flagged for the committee), also copied to `ranking_latest.md` / `.csv`. It is marked provisional while any answer is missing or a model has stopped;
 * `rankings/questions_<UTC time>.csv`: each accepted question's score, accuracy, contribution, answers received, unanswered rate, the wrong option the panel picked most and its share, the source-check verdict, and its review reasons;
