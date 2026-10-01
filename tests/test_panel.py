@@ -387,3 +387,30 @@ def test_p6_small_is_the_three_smallest_p6_models(p6):
     by_key = {m["key"]: m for m in p6["models"]}
     for m in small["models"]:  # identical copies, so their answers are interchangeable with P6's
         assert m == by_key[m["key"]]
+
+
+def test_is_reasoning_leak_ignores_refusals():
+    refusal = {
+        "status": 200,
+        "content": "I'm not able to see the question. Can you",
+        "finish": "length",
+        "completion_tokens": 16,
+    }
+    assert pn.is_leak(refusal) and not pn.is_reasoning_leak(refusal)
+    for strong in ({"reasoning_len": 40}, {"reasoning_tokens": 3}, {"content": "<think>x"}, {"completion_tokens": 900}):
+        rec = {"status": 200, "content": "B", "finish": "stop", "completion_tokens": 1, **strong}
+        assert pn.is_reasoning_leak(rec) and pn.is_leak(rec)
+    assert not pn.is_reasoning_leak({"status": 503})
+
+
+def test_lenient_leak_rule_lets_refusals_through(tmp_path, monkeypatch, p6, no_sleep):
+    spec = p6["models"][1]
+    refusal = _response("I'm not able to see the question. Can you please provide", finish="length", completion_tokens=16)
+    fake = FakeLiteLLM(default=refusal)
+    _run_worker(tmp_path, monkeypatch, spec, fake, n=40, cap=1, strict_leaks=False)
+    assert len(fake.calls) == 40 and not (tmp_path / f"{spec['key']}.ABORT").exists()
+    reasoning = _response("B", reasoning="Let me think about which option")
+    fake = FakeLiteLLM(default=reasoning)
+    (tmp_path / "x").mkdir()
+    _run_worker(tmp_path / "x", monkeypatch, spec, fake, n=40, cap=1, strict_leaks=False)
+    assert "reasoning leaks" in (tmp_path / "x" / f"{spec['key']}.ABORT").read_text() and len(fake.calls) < 40

@@ -458,20 +458,30 @@ def ask(litellm, spec: dict, item: dict, bill_to: str, token: str, max_attempts:
 # ---------------------------------------------------------------------------------------------------------- scoring
 
 
-def is_leak(rec: dict) -> bool:
-    """A 200 reply that reasoned: reasoning fields or tokens, a think tag, more tokens than the cap (Novita ignores
-    ``max_tokens`` while a model reasons), or a reply cut at the cap that does not start with a letter."""
+def is_reasoning_leak(rec: dict) -> bool:
+    """A 200 reply with unmistakable reasoning: reasoning fields or tokens, a think tag, or more tokens than the cap
+    (Novita ignores ``max_tokens`` while a model reasons)."""
     if rec.get("status") != 200:
         return False
-    cut_prose = rec.get("finish") == "length" and parse_answer_v2(rec.get("content"))[1] not in ("only", "lead")
     return bool(
         rec.get("reasoning_len")
         or (rec.get("reasoning_tokens") or 0) > 0
         or rec.get("think_tag")
         or has_think_tag(rec.get("content"))
         or (rec.get("completion_tokens") or 0) > V2_MAX_TOKENS
-        or cut_prose
     )
+
+
+def is_leak(rec: dict) -> bool:
+    """A 200 reply that reasoned (`is_reasoning_leak`), or a reply cut at the cap that does not start with a letter.
+
+    The second case caught Kimi-K2 writing its reasoning into the answer in the pilot, but it also matches a model
+    that refuses or comments on a malformed question ("I'm not able to see the question..."), so the datathon's stop
+    rule ignores it (see `run_model`'s ``strict_leaks``)."""
+    if rec.get("status") != 200:
+        return False
+    cut_prose = rec.get("finish") == "length" and parse_answer_v2(rec.get("content"))[1] not in ("only", "lead")
+    return is_reasoning_leak(rec) or cut_prose
 
 
 def score(rec: dict | None) -> tuple[str | None, str]:
@@ -521,8 +531,12 @@ def run_model(
     max_leaks: int,
     max_error_rate: float,
     retry_rounds: int,
+    strict_leaks: bool = True,
 ) -> None:
     """Evaluate one model (in its own process), resuming from its JSONL log.
+
+    The model stops after ``max_leaks`` leaks: any `is_leak` reply, or with ``strict_leaks=False`` only replies with
+    unmistakable reasoning (`is_reasoning_leak`), so that untrusted questions that make a model refuse cannot stop it.
 
     Writes ``<key>.ABORT`` with the reason if the model stops early. A billing stop (402 or the spending-limit 403)
     also writes ``STOP``, which halts every other model of the run.
@@ -533,7 +547,8 @@ def run_model(
     items = json.loads(Path(items_file).read_text(encoding="utf-8"))
     log_path, abort_file, stop_file = Path(out_dir) / f"{key}.jsonl", Path(out_dir) / f"{key}.ABORT", Path(out_dir) / "STOP"
     done = latest_records(log_path)
-    state: dict[str, Any] = dict(leaks=sum(1 for r in done.values() if is_leak(r)), errors=0, answered=0, consec=0)
+    leak = is_leak if strict_leaks else is_reasoning_leak
+    state: dict[str, Any] = dict(leaks=sum(1 for r in done.values() if leak(r)), errors=0, answered=0, consec=0)
     state["reason"] = None
     lock, stop = threading.Lock(), threading.Event()
 
@@ -542,7 +557,7 @@ def run_model(
             if rec["status"] == 200:
                 state["answered"] += 1
                 state["consec"] = 0
-                state["leaks"] += is_leak(rec)
+                state["leaks"] += leak(rec)
             else:
                 state["errors"] += 1
                 state["consec"] += 1
@@ -888,10 +903,12 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
     report(specs, items, out_dir, args.set_name, args.run, panel["name"], args.dry_run)
 
 
-def run_panel_processes(specs: list[dict], n_items: int, out_dir: Path, args, bill_to: str, max_leaks=None) -> None:
+def run_panel_processes(
+    specs: list[dict], n_items: int, out_dir: Path, args, bill_to: str, max_leaks=None, strict_leaks: bool = True
+) -> None:
     """Run every model on ``out_dir/items.json`` in parallel (one process each), print progress until all finish,
     and record the billing usage before and after. ``max_leaks`` (an int, or a dict by model key) overrides
-    ``args.max_leaks``."""
+    ``args.max_leaks``; ``strict_leaks`` is passed to `run_model`."""
     check_environment(args.dry_run)
     (out_dir / "STOP").unlink(missing_ok=True)
     caps = dict(kv.split("=") for kv in args.cap or [])
@@ -914,6 +931,7 @@ def run_panel_processes(specs: list[dict], n_items: int, out_dir: Path, args, bi
                 leaks[s["key"]] if isinstance(leaks, dict) else leaks,
                 args.max_error_rate,
                 args.retry_rounds,
+                strict_leaks,
             ),
         )
         procs[s["key"]].start()

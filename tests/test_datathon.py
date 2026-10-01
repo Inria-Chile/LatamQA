@@ -239,6 +239,7 @@ def test_datathon_dry_run_end_to_end(db, tmp_path, monkeypatch):
     assert {r["team"] for r in rows} == {"Equipo Uno", "Equipo | Dos", "Equipo Tres"}
     assert all(r["pending_questions"] == "0" for r in rows)
     assert "complete" in (event / "ranking_latest.md").read_text()
+    assert "Replies without an answer letter: qwen3-4b 0.0%, kimi-k2 0.0%" in (event / "ranking_latest.md").read_text()
     n_lines = sum(1 for _ in open(event / "kimi-k2.jsonl"))
     assert n_lines == 28  # 3 questions x 2 languages x 4 orders + 4 regional-only cells; Kimi's switch sent, no leak
     assert not any(pn.is_leak(json.loads(line)) for line in open(event / "kimi-k2.jsonl"))

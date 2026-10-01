@@ -427,6 +427,13 @@ def rank_and_write(args, specs: list[dict], teams: list[dict], accepted: list[di
         note += f" {pending} question(s) still missing panel answers."
     if aborted:
         note += f" Stopped models: {', '.join(aborted)} (see their .ABORT files)."
+    unanswered = []
+    for key, recs in logs.items():  # a high rate over the whole field can mean a broken reasoning switch
+        current = [recs[c["qid"]] for c in cells if recs.get(c["qid"], {}).get("status") == 200]
+        if current:
+            unanswered.append(f"{key} {sum(pn.score(r)[1] in ('none', 'leak') for r in current) / len(current):.1%}")
+    if unanswered:
+        note += f" Replies without an answer letter: {', '.join(unanswered)}."
     if args.dry_run:
         note += " DRY RUN: fake answers, not a real ranking."
     stamp = unique_stamp(out_dir / "rankings", "ranking_{}.md")
@@ -446,9 +453,12 @@ def stage_run(args, panel: dict, specs: list[dict]) -> None:
             raise pn.PanelError(f"estimate exceeds --budget_usd {args.budget_usd}")
         if not (args.yes or args.dry_run):
             raise pn.PanelError("paid stage: re-run with --yes (or --dry_run to test offline)")
-        # leaks already in a model's log do not count against this run's --max_leaks
-        previous = {k: sum(pn.is_leak(r) for r in recs.values()) for k, recs in done.items()}
-        pn.run_panel_processes(specs, len(cells), out_dir, args, bill_to, {k: v + args.max_leaks for k, v in previous.items()})
+        # Team questions are untrusted: a model that refuses or comments on a malformed question is scored as not
+        # answering it, and only unmistakable reasoning counts toward the stop rule (strict_leaks=False). Leaks already
+        # in a model's log do not count against this run's --max_leaks.
+        previous = {k: sum(pn.is_reasoning_leak(r) for r in recs.values()) for k, recs in done.items()}
+        max_leaks = {k: v + args.max_leaks for k, v in previous.items()}
+        pn.run_panel_processes(specs, len(cells), out_dir, args, bill_to, max_leaks, strict_leaks=False)
     else:
         print("every cell already has a panel answer; ranking only")
     rank_and_write(args, specs, teams, accepted, cells, out_dir)
