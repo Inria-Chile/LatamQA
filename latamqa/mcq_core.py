@@ -18,6 +18,7 @@ working unchanged.
 
 import random
 import re
+import zlib
 from typing import Any, List, Mapping, Tuple
 
 DEFAULT_PROPMT_TEMPLATE: str = """"Answer the following multiple-choice question by selecting ONLY the letter (A, B, C, or D) of the correct answer.
@@ -183,3 +184,109 @@ def evaluate_mcq_dict(
         llm_uri=llm_uri,
         num_retries=num_retries,
     )
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Protocol v2
+#
+# Everything above is protocol v1: the settings behind the published leaderboard, left unchanged so those numbers stay
+# reproducible. Protocol v2 is the request and scoring spec validated in the Sep 2026 pilot of the open-weight panel
+# on Hugging Face Inference Providers (see `latamqa.panel`). It differs from v1 in four ways:
+#
+# - option order: stable across processes and runs. v1 seeds each question with `hash(article_id)`, which Python
+#   salts per process, so every run (and every model) sees a different order. v2 derives five fixed orders from a
+#   string seed: orders 1-4 are the four cyclic shifts of one base shuffle and order 5 is an independent shuffle, so
+#   averaging runs 1-4 cancels position bias and comparing them measures it;
+# - prompt: the v1 template's stray leading quote is dropped, a fixed system message is sent, and answers are capped
+#   at `V2_MAX_TOKENS` (non-thinking models only: v2 sends each model's reasoning switch and flags any reasoning);
+# - parsing: `parse_answer_v2` accepts a bare letter or a letter-first reply ("B) option text"), then an explicit
+#   answer cue; unlike `extract_answer` it never takes the first character of a sentence ("A resposta ..." is not A);
+# - scoring: errors, unparsable and leaked answers count as wrong, and coverage is reported (v1 divides by the
+#   answered questions only).
+
+PROTOCOL_V1 = "v1"
+PROTOCOL_V2 = "v2"
+V2_PROMPT_TEMPLATE: str = DEFAULT_PROPMT_TEMPLATE.lstrip('"')
+V2_SYSTEM_MESSAGE = "Answer with a single letter: A, B, C, or D."
+V2_MAX_TOKENS = 16
+V2_OPTION_ORDERS = 5
+LETTERS = "ABCD"
+
+_BARE = re.compile(r"^[\W_]*([ABCD])[\).]?[\W_]*$")
+_LETTER_LED = re.compile(r"^[\W_]*([ABCD])\)\s+\S")
+_CUE = re.compile(  # the letter itself is case-sensitive: "a resposta é a capital" is not A
+    r"(?:answer|respuesta|resposta|alternativa|opci[oó]n|op[cç][aã]o|letra)[^A-Za-z\n]{0,20}"
+    r"(?:(?:correcta|correta|correct|es|é|is|la|a)\s+){0,3}[\(\*\"']*((?-i:[ABCD]))\b",
+    re.IGNORECASE,
+)
+_THINK_TAG = re.compile(r"<think|</think>", re.IGNORECASE)
+
+
+def question_id(row_id: object, question: str) -> str:
+    """Stable question id: the row id plus a CRC32 of the question text (row ids alone may repeat)."""
+    return f"{row_id}:{zlib.crc32(str(question).encode()):08x}"
+
+
+def permuted_options(
+    qid: str,
+    answer: str,
+    d1: str,
+    d2: str,
+    d3: str,
+    order: int,
+    seed: int = 42,
+) -> Tuple[List[str], str]:
+    """Return (options, correct_letter) for option order 1-5 of question ``qid``.
+
+    Orders 1-4 are the cyclic shifts (by ``order - 1``) of one base shuffle; order 5 is an independent shuffle. The
+    result depends only on ``qid``, ``order`` and ``seed``, so every model and every re-run sees the same options.
+
+    >>> permuted_options("q1", "right", "w1", "w2", "w3", 1) == permuted_options("q1", "right", "w1", "w2", "w3", 1)
+    True
+    >>> base, _ = permuted_options("q1", "right", "w1", "w2", "w3", 1)
+    >>> permuted_options("q1", "right", "w1", "w2", "w3", 2)[0] == base[1:] + base[:1]
+    True
+    """
+    if not 1 <= order <= V2_OPTION_ORDERS:
+        raise ValueError(f"order must be 1..{V2_OPTION_ORDERS}, got {order}")
+    options = [("answer", answer), ("d1", d1), ("d2", d2), ("d3", d3)]
+    if order <= 4:
+        random.Random(f"{seed}:base:{qid}").shuffle(options)
+        k = order - 1
+        options = options[k:] + options[:k]
+    else:
+        random.Random(f"{seed}:run{order}:{qid}").shuffle(options)
+    correct = LETTERS[next(i for i, (label, _) in enumerate(options) if label == "answer")]
+    return [text for _, text in options], correct
+
+
+def parse_answer_v2(text: str | None) -> Tuple[str | None, str]:
+    """Return (letter, rule) for a reply; rule is ``only``, ``lead``, ``cue`` or ``none``.
+
+    >>> parse_answer_v2("B")
+    ('B', 'only')
+    >>> parse_answer_v2("C) Brasília")
+    ('C', 'lead')
+    >>> parse_answer_v2("La respuesta correcta es D.")
+    ('D', 'cue')
+    >>> parse_answer_v2("A resposta não está clara")
+    (None, 'none')
+    >>> parse_answer_v2("A resposta correta é a capital")
+    (None, 'none')
+    """
+    text = text or ""
+    match = _BARE.match(text.strip())
+    if match:
+        return match.group(1), "only"
+    match = _LETTER_LED.match(text)
+    if match:
+        return match.group(1), "lead"
+    hits = _CUE.findall(text)
+    if hits:
+        return hits[-1].upper(), "cue"
+    return None, "none"
+
+
+def has_think_tag(text: str | None) -> bool:
+    """True when a reply contains a ``<think>`` or ``</think>`` tag (reasoning written into the content)."""
+    return bool(_THINK_TAG.search(text or ""))

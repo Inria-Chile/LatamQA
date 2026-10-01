@@ -1,0 +1,34 @@
+# Panel P6-small: the three smallest models of P6, for cheap test runs (pipeline checks, dress rehearsals, trying the
+# datathon scoring). Not a substitute for P6 in results that get published. Each entry is a copy of the P6 entry with
+# the same key, so its answers are interchangeable with P6's (tests/test_panel.py checks that the copies stay identical).
+# Fields are described in p6.yaml.
+name: P6-small
+description: >-
+  Qwen3-4B-2507 (nscale), Llama-3.1-8B (novita) and Qwen3.5-9B (deepinfra): the three smallest P6 models, for testing.
+protocol: v2
+bill_to: inria-chile
+
+models:
+  - key: qwen3-4b
+    hub_id: Qwen/Qwen3-4B-Instruct-2507
+    provider: nscale
+    size: 4B
+    price: {input: 0.01, output: 0.03}
+    max_in_flight: 45
+    extra_body: {}  # Instruct-2507 does not think
+  - key: llama-3.1-8b
+    hub_id: meta-llama/Llama-3.1-8B-Instruct
+    provider: novita
+    size: 8B
+    price: {input: 0.02, output: 0.05}
+    max_in_flight: 70
+    extra_body: {}
+    note: Gated on the Hub; the running account needs access.
+  - key: qwen3.5-9b
+    hub_id: Qwen/Qwen3.5-9B
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 9B
+    price: {input: 0.10, output: 0.15}
+    max_in_flight: 60
+    extra_body: {reasoning_effort: none}

@@ -1,0 +1,106 @@
+# Panel P6: seven open-weight models from 4B to 1T parameters on Hugging Face Inference Providers, run with
+# `panel run` under protocol v2 (see latamqa/mcq_core.py and latamqa/panel.py). Chosen and verified in the
+# Sep 2026 pilot: every route, reasoning switch, answer format and the 13.3 req/s pace (P5's load test, plus
+# Qwen2.5-72B's own variants and smoke checks).
+#
+# Per model:
+#   key             short name used on the command line and in output file names
+#   hub_id          Hugging Face model id
+#   provider        HF Inference Provider the model is pinned to
+#   api_base        router URL to call instead of the provider-prefixed default. DeepInfra must use its
+#                   /v1/openai route: the router rejects LiteLLM's default DeepInfra path with HTTP 400.
+#   extra_body      request fields sent verbatim, here the reasoning switch. LiteLLM rejects a top-level
+#                   `reasoning_effort` for Hugging Face, so it goes in extra_body.
+#   price           USD per million input and output tokens (list prices, 30 Sep 2026), for cost estimates
+#   max_in_flight   concurrent requests allowed for this model (pilot load-test peak + 50 %)
+name: P6
+description: >-
+  Qwen3-4B-2507, Llama-3.1-8B, Qwen3.5-9B/27B/397B, Qwen2.5-72B and Kimi-K2 on per-token providers
+  (nscale, Novita, DeepInfra). P5 with Qwen2.5-72B-Instruct in place of Qwen3.5-122B-A10B.
+protocol: v2
+bill_to: inria-chile
+
+models:
+  - key: qwen3-4b
+    hub_id: Qwen/Qwen3-4B-Instruct-2507
+    provider: nscale
+    size: 4B
+    price: {input: 0.01, output: 0.03}
+    max_in_flight: 45
+    extra_body: {}  # Instruct-2507 does not think
+  - key: llama-3.1-8b
+    hub_id: meta-llama/Llama-3.1-8B-Instruct
+    provider: novita
+    size: 8B
+    price: {input: 0.02, output: 0.05}
+    max_in_flight: 70
+    extra_body: {}
+    note: Gated on the Hub; the running account needs access.
+  - key: qwen3.5-9b
+    hub_id: Qwen/Qwen3.5-9B
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 9B
+    price: {input: 0.10, output: 0.15}
+    max_in_flight: 60
+    extra_body: {reasoning_effort: none}
+  - key: qwen3.5-27b
+    hub_id: Qwen/Qwen3.5-27B
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 27B
+    price: {input: 0.26, output: 2.60}
+    max_in_flight: 60
+    extra_body: {reasoning_effort: none}
+  - key: qwen2.5-72b
+    hub_id: Qwen/Qwen2.5-72B-Instruct
+    provider: novita
+    size: 72.7B
+    price: {input: 0.38, output: 0.40}
+    max_in_flight: 70
+    extra_body: {}  # does not think; bf16 on Novita
+  - key: qwen3.5-397b
+    hub_id: Qwen/Qwen3.5-397B-A17B
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 397B (17B active)
+    price: {input: 0.45, output: 3.00}
+    max_in_flight: 60
+    extra_body: {reasoning_effort: none}
+  - key: kimi-k2
+    hub_id: moonshotai/Kimi-K2-Instruct
+    provider: novita
+    size: 1T (32B active)
+    price: {input: 0.57, output: 2.30}
+    max_in_flight: 90
+    # Novita's Kimi-K2 reasons in 10-22 % of answers without this; enable_thinking and chat_template_kwargs do not stop it.
+    extra_body: {thinking: {type: disabled}}
+
+# Verified alternatives, usable with --swap (e.g. --swap qwen2.5-72b=qwen2.5-72b-di). Not part of the panel.
+alternatives:
+  - key: qwen2.5-72b-di
+    hub_id: Qwen/Qwen2.5-72B-Instruct
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 72.7B
+    price: {input: 0.36, output: 0.40}
+    max_in_flight: 70
+    extra_body: {}
+    note: Fallback route for qwen2.5-72b (fp8 on DeepInfra).
+  - key: qwen3.5-122b
+    hub_id: Qwen/Qwen3.5-122B-A10B
+    provider: novita
+    size: 122B (10B active)
+    price: {input: 0.40, output: 3.20}
+    max_in_flight: 60
+    extra_body: {enable_thinking: false, chat_template_kwargs: {enable_thinking: false}}
+    note: P5's rung, replaced by qwen2.5-72b after Novita's route failed on 30 Sep 2026.
+  - key: deepseek-v3.2
+    hub_id: deepseek-ai/DeepSeek-V3.2
+    provider: deepinfra
+    api_base: https://router.huggingface.co/deepinfra/v1/openai/chat/completions
+    size: 671B (37B active)
+    price: {input: 0.26, output: 0.38}
+    max_in_flight: 40
+    extra_body: {reasoning_effort: none}
+    note: Fallback top rung; answers without reasoning on DeepInfra, the switch is sent to be safe.

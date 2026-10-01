@@ -22,6 +22,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "seaborn>=0.13.2",
     "tenacity>=9.1.4",
+    "rich",
 ]
 
 [project.optional-dependencies]
@@ -78,4 +79,6 @@ norecursedirs = ".venv"
 eval_mcq = "latamqa.eval_mcq:main"
 leaderboard = "latamqa.leaderboard:main"
 model_eval = "latamqa.model_eval:main"
+panel = "latamqa.panel:main"
+datathon = "latamqa.datathon:main"
 serve_vllm = "latamqa.serve_vllm:main"
