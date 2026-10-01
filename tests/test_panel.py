@@ -378,3 +378,12 @@ def test_check_needs_no_question_set(monkeypatch):
     monkeypatch.setattr(pn, "stage_check", lambda args, panel, specs: called.append([s["key"] for s in specs]))
     pn.main(["check", "--swap", "qwen2.5-72b=qwen2.5-72b-di"])
     assert called and "qwen2.5-72b-di" in called[0]
+
+
+def test_p6_small_is_the_three_smallest_p6_models(p6):
+    small = pn.load_panel("p6-small")
+    assert small["name"] == "P6-small" and small["protocol"] == p6["protocol"] and small["bill_to"] == p6["bill_to"]
+    assert [m["key"] for m in small["models"]] == ["qwen3-4b", "llama-3.1-8b", "qwen3.5-9b"]
+    by_key = {m["key"]: m for m in p6["models"]}
+    for m in small["models"]:  # identical copies, so their answers are interchangeable with P6's
+        assert m == by_key[m["key"]]

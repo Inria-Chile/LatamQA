@@ -395,6 +395,9 @@ reasoning switches, answer format and throughput):
 | `qwen3.5-397b` | Qwen3.5-397B-A17B               | deepinfra | `reasoning_effort: none`             |
 | `kimi-k2`      | Kimi-K2-Instruct                | novita    | `thinking: {type: disabled}`         |
 
+[`p6-small`](latamqa/panels/p6-small.yaml) holds only P6's three smallest models
+(Qwen3-4B-2507, Llama-3.1-8B, Qwen3.5-9B) for cheap test runs: `--panel p6-small`.
+
 Each model entry sets `key`, `hub_id`, `provider`, `price` (USD per million
 input/output tokens, for cost estimates), `max_in_flight`, and optionally
 `api_base` (DeepInfra must use its `/v1/openai` router route), `extra_body`,
